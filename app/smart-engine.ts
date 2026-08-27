@@ -364,7 +364,7 @@ export function enrichEntries(
         : parts.join("/"),
       folder = rule ? apply(rule.destination) : "",
       planned = (classify
-        ? `${sourceRoot}/${folder}/${internal.split("/").pop()}`
+        ? `${sourceRoot}/${folder}/${internal}`
         : `${sourceRoot}/${internal}`
       ).replace(/\/+/g, "/");
     let collision: SmartEntry["collision"];
@@ -399,7 +399,7 @@ export function enrichEntries(
       collision,
       included,
       explanation: rule
-        ? `Règle ${rule.priority} appliquée : ${rule.field} ${rule.operator} « ${rule.value || "tous"} » → ${rule.destination}`
+        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}`
         : `Arborescence originale conservée dans « ${sourceRoot} »`,
     };
     names.set(final.toLowerCase(), out);
