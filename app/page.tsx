@@ -66,6 +66,9 @@ const DEF: RenameOptions = {
 };
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 type BulkOverride = { category?: string; folder?: string; prefix?: string };
+type FolderArchive = { file: File; path: string; included: boolean };
+const archivePattern = /\.(zip|tar|tar\.gz|tgz|gz|gzip|7z|rar)$/i;
+const hiddenOrSystem = (path: string) => path.split("/").some((part) => part.startsWith(".") || ["__MACOSX", "node_modules", "$RECYCLE.BIN", "System Volume Information"].includes(part));
 function dl(data: Uint8Array, name: string, type: string) {
   const u = URL.createObjectURL(new Blob([data as BlobPart], { type })),
     a = document.createElement("a");
@@ -110,8 +113,12 @@ export default function Home() {
     [overrides, setOverrides] = useState<Record<string, BulkOverride>>({}),
     [bulkCategory, setBulkCategory] = useState(""),
     [bulkFolder, setBulkFolder] = useState(""),
-    [bulkPrefix, setBulkPrefix] = useState("");
+    [bulkPrefix, setBulkPrefix] = useState(""),
+    [folderMode, setFolderMode] = useState<"auto" | "choose">("choose"),
+    [includeHidden, setIncludeHidden] = useState(false),
+    [folderArchives, setFolderArchives] = useState<FolderArchive[]>([]);
   const input = useRef<HTMLInputElement>(null),
+    folderInput = useRef<HTMLInputElement>(null),
     jsonInput = useRef<HTMLInputElement>(null),
     abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -221,6 +228,30 @@ export default function Home() {
       setBusy(false);
     }
   }
+  async function processFolderArchives(items: FolderArchive[]) {
+    const chosen = items.filter((item) => item.included);
+    if (!chosen.length) { setError("Aucune archive sélectionnée dans ce dossier."); return; }
+    setBusy(true); setError("");
+    try {
+      setSources(chosen.map((item) => item.file));
+      const all: ArchiveEntry[] = [];
+      for (const item of chosen) {
+        const extracted = await readArchive(item.file);
+        all.push(...extracted.map((entry) => ({ ...entry, source: item.path })));
+      }
+      setEntries(await hashEntries(all));
+      setFolderArchives([]);
+    } catch (e) { setError(e instanceof Error ? e.message : "Analyse récursive impossible"); }
+    finally { setBusy(false); }
+  }
+  async function addFolder(l: FileList | null) {
+    if (!l?.length) return;
+    const found = Array.from(l).map((file) => ({ file, path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name, included: true }))
+      .filter((item) => archivePattern.test(item.file.name) && (includeHidden || !hiddenOrSystem(item.path)));
+    if (!found.length) { setError("Aucune archive compatible trouvée dans ce dossier."); return; }
+    if (folderMode === "auto") await processFolderArchives(found);
+    else setFolderArchives(found);
+  }
   function reset(m?: Mode) {
     if (m) setMode(m);
     setSources([]);
@@ -229,6 +260,7 @@ export default function Home() {
     setDestinationAnalysis(null);
     setExcluded(new Set());
     setOverrides({});
+    setFolderArchives([]);
   }
 
   function applyBulk(kind: "category" | "folder" | "prefix") {
@@ -486,6 +518,7 @@ export default function Home() {
                 }
                 onChange={(e) => addFiles(e.target.files)}
               />
+              <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => addFolder(e.target.files)} />
               <button
                 className="dropmini"
                 onClick={() => input.current?.click()}
@@ -499,6 +532,21 @@ export default function Home() {
                 <strong>Ajouter des fichiers</strong>
                 <small>Glissez-déposez ou parcourez</small>
               </button>
+              {mode === "extract" && (
+                <div className="folderimport">
+                  <button onClick={() => folderInput.current?.click()}><FolderTree />Importer un dossier récursivement</button>
+                  <label><input type="radio" checked={folderMode === "choose"} onChange={() => setFolderMode("choose")} /> Choisir les archives avant analyse</label>
+                  <label><input type="radio" checked={folderMode === "auto"} onChange={() => setFolderMode("auto")} /> Analyser automatiquement</label>
+                  <label title="Recommandé pour éviter les fichiers inutiles et sensibles"><input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} /> Inclure les dossiers cachés et système</label>
+                </div>
+              )}
+              {folderArchives.length > 0 && (
+                <div className="foldercandidates">
+                  <b>{folderArchives.filter((item) => item.included).length} archive(s) sélectionnée(s)</b>
+                  <div>{folderArchives.map((item, index) => <label key={item.path}><input type="checkbox" checked={item.included} onChange={() => setFolderArchives((current) => current.map((value, i) => i === index ? { ...value, included: !value.included } : value))} /><span>{item.path}</span></label>)}</div>
+                  <footer><button onClick={() => setFolderArchives((current) => current.map((item) => ({ ...item, included: true })))}>Tout</button><button onClick={() => setFolderArchives([])}>Annuler</button><button onClick={() => processFolderArchives(folderArchives)}>Analyser la sélection</button></footer>
+                </div>
+              )}
               {sources.length > 0 && (
                 <div className="source-summary">
                   <b>{sources.length}</b>
@@ -573,10 +621,10 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}>
-                <HardDrive />
-                {destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}
-              </button>
+              <div className="destinationchoice">
+                <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}><HardDrive />{destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}</button>
+                {destination && <button className="removedestination" title="Retirer le dossier choisi" onClick={() => { setDestination(null); setDestinationAnalysis(null); }}><XCircle /></button>}
+              </div>
               {destination && <small className="destinationhint">Vous pourrez aussi le changer après la simulation.</small>}
             </section>
           </aside>
