@@ -67,6 +67,16 @@ const DEF: RenameOptions = {
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 type BulkOverride = { category?: string; folder?: string; prefix?: string };
 type FolderArchive = { file: File; path: string; included: boolean };
+type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
+const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string }[] = [
+  { id: "custom", name: "Personnalisé", description: "Vos catégories et règles actuelles" },
+  { id: "sig", name: "SIG", category: "SIG", folder: "SIG", description: "Shapefiles, GeoJSON, GPKG, QGIS et données géographiques" },
+  { id: "documents", name: "Documents", category: "Bureautique", folder: "Documents", description: "Documents, PDF, tableurs et présentations" },
+  { id: "media", name: "Médias", category: "Audio et vidéo", folder: "Médias", description: "Images, audio, vidéo et fichiers associés" },
+  { id: "developer", name: "Développeur", category: "Développement", folder: "Code", description: "Code source, configurations et documentation" },
+  { id: "cad", name: "CAO / BIM", category: "CAO, BIM et scientifique", folder: "CAO-BIM", description: "Plans, modèles, maquettes et ressources techniques" },
+  { id: "science", name: "Scientifique", category: "Données", folder: "Données-scientifiques", description: "Jeux de données, bases, mesures et résultats" },
+];
 const archivePattern = /\.(zip|tar|tar\.gz|tgz|gz|gzip|7z|rar)$/i;
 const hiddenOrSystem = (path: string) => path.split("/").some((part) => part.startsWith(".") || ["__MACOSX", "node_modules", "$RECYCLE.BIN", "System Volume Information"].includes(part));
 function dl(data: Uint8Array, name: string, type: string) {
@@ -118,7 +128,8 @@ export default function Home() {
     [includeHidden, setIncludeHidden] = useState(false),
     [folderArchives, setFolderArchives] = useState<FolderArchive[]>([]),
     [preserveRoot, setPreserveRoot] = useState(true),
-    [preserveEmpty, setPreserveEmpty] = useState(true);
+    [preserveEmpty, setPreserveEmpty] = useState(true),
+    [profile, setProfile] = useState<ProfileId>("custom");
   const input = useRef<HTMLInputElement>(null),
     folderInput = useRef<HTMLInputElement>(null),
     jsonInput = useRef<HTMLInputElement>(null),
@@ -138,6 +149,7 @@ export default function Home() {
         setPolicy(c.policy || "keep-both");
         setClassify(c.classify || false);
         setRenameEnabled(c.renameEnabled || false);
+        setProfile(c.profile || "custom");
       }
     } catch {}
   }, []);
@@ -152,9 +164,10 @@ export default function Home() {
           policy,
           classify,
           renameEnabled,
+          profile,
         }),
       ),
-    [rules, cats, rename, policy, classify, renameEnabled],
+    [rules, cats, rename, policy, classify, renameEnabled, profile],
   );
   const basePlanned = useMemo(
       () =>
@@ -310,6 +323,18 @@ export default function Home() {
       });
       return next;
     });
+  }
+  function applyProfile(id: ProfileId) {
+    setProfile(id);
+    if (id === "custom") return;
+    const selected = PROFILES.find((item) => item.id === id)!;
+    const profileCategories = id === "media" ? ["Images", "Audio et vidéo"] : id === "science" ? ["Données", "CAO, BIM et scientifique"] : [selected.category!];
+    setClassify(true);
+    setRules([
+      ...profileCategories.map((category, index) => ({ id: `profile-${id}-${index}`, priority: index + 1, enabled: true, field: "category" as const, operator: "equals" as const, value: category, destination: `{projet}/${selected.folder}/{category}/{annee}` })),
+      { id: `profile-${id}-other`, priority: 99, enabled: true, field: "name", operator: "contains", value: "", destination: `{projet}/Autres/{category}` },
+    ]);
+    setRename((current) => ({ ...current, project: selected.name }));
   }
 
   function setAllSelection(action: "all" | "none" | "invert") {
@@ -615,6 +640,14 @@ export default function Home() {
                   <small>Un dossier séparé par archive</small>
                 </span>
               </label>
+              <label className="profilepicker">
+                Profil métier
+                <select value={profile} onChange={(e) => applyProfile(e.target.value as ProfileId)}>
+                  {PROFILES.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+                </select>
+                <small>{PROFILES.find((item) => item.id === profile)?.description}</small>
+              </label>
+              {profile !== "custom" && <div className="profileactive"><ShieldCheck /><span><b>Profil {PROFILES.find((item) => item.id === profile)?.name} actif</b><small>Règles appliquées automatiquement et modifiables.</small></span></div>}
               <label className="optioncheck">
                 <input
                   type="checkbox"
