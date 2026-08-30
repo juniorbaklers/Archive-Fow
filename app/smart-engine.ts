@@ -39,6 +39,7 @@ export type SmartEntry = ArchiveEntry & {
     | "same-name-same-content"
     | "same-name-different-content"
     | "same-content-different-name";
+  contentMatch?: boolean;
   included?: boolean;
 };
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
@@ -367,7 +368,8 @@ export function enrichEntries(
         ? `${sourceRoot}/${folder}/${internal}`
         : `${sourceRoot}/${internal}`
       ).replace(/\/+/g, "/");
-    let collision: SmartEntry["collision"];
+    let collision: SmartEntry["collision"],
+      contentMatch = false;
     const sameName = names.get(planned.toLowerCase()),
       sameHash = e.hash ? hashes.get(e.hash) : undefined;
     if (sameName)
@@ -375,7 +377,7 @@ export function enrichEntries(
         sameName.hash === e.hash
           ? "same-name-same-content"
           : "same-name-different-content";
-    else if (sameHash) collision = "same-content-different-name";
+    else if (sameHash) contentMatch = true;
     let final = planned,
       included = true;
     if (collision) {
@@ -397,6 +399,7 @@ export function enrichEntries(
       family,
       familyIncomplete,
       collision,
+      contentMatch,
       included,
       explanation: rule
         ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}`
