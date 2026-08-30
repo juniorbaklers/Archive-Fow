@@ -62,6 +62,7 @@ const DEF: RenameOptions = {
   regex: false,
   maxLength: 120,
 };
+const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 function dl(data: Uint8Array, name: string, type: string) {
   const u = URL.createObjectURL(new Blob([data as BlobPart], { type })),
     a = document.createElement("a");
@@ -93,7 +94,8 @@ export default function Home() {
     [destination, setDestination] = useState<FileSystemDirectoryHandle | null>(null),
     [destinationAnalysis, setDestinationAnalysis] = useState<DestinationAnalysis | null>(null),
     [destinationBusy, setDestinationBusy] = useState(false),
-    [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null);
+    [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null),
+    [excluded, setExcluded] = useState<Set<string>>(new Set());
   const input = useRef<HTMLInputElement>(null),
     jsonInput = useRef<HTMLInputElement>(null),
     abortRef = useRef<AbortController | null>(null);
@@ -146,6 +148,7 @@ export default function Home() {
     filtered = planned.filter((e) =>
       (e.planned || e.name).toLowerCase().includes(query.toLowerCase()),
     ),
+    selectedCount = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e))).length,
     dupes = planned.filter((e) => e.collision).length,
     incomplete = planned.filter((e) => e.familyIncomplete).length,
     total = sources.reduce((s, f) => s + f.size, 0),
@@ -153,9 +156,7 @@ export default function Home() {
       const m = new Map<string, SmartEntry[]>();
       for (const e of filtered) {
         const p = e.planned || e.name,
-          f = p.includes("/")
-            ? p.split("/").slice(0, -1).join(" / ")
-            : "Racine";
+          f = p.includes("/") ? p.split("/").slice(0, -1).join("/") : "";
         m.set(f, [...(m.get(f) || []), e]);
       }
       return [...m];
@@ -196,6 +197,34 @@ export default function Home() {
     setEntries([]);
     setError("");
     setDestinationAnalysis(null);
+    setExcluded(new Set());
+  }
+
+  function setAllSelection(action: "all" | "none" | "invert") {
+    setExcluded((current) => {
+      if (action === "all") return new Set();
+      if (action === "none") return new Set(planned.map(entryKey));
+      return new Set(planned.filter((entry) => !current.has(entryKey(entry))).map(entryKey));
+    });
+  }
+  function toggleEntry(entry: SmartEntry) {
+    setExcluded((current) => {
+      const next = new Set(current), key = entryKey(entry);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+  function toggleFolder(folder: string) {
+    const children = planned.filter((entry) => {
+      const path = entry.planned || entry.name;
+      return folder ? path.startsWith(`${folder}/`) : !path.includes("/");
+    });
+    const exclude = children.some((entry) => !excluded.has(entryKey(entry)));
+    setExcluded((current) => {
+      const next = new Set(current);
+      children.forEach((entry) => exclude ? next.add(entryKey(entry)) : next.delete(entryKey(entry)));
+      return next;
+    });
   }
 
   async function chooseDestination(runAfter = false) {
@@ -205,7 +234,7 @@ export default function Home() {
       setDestination(handle);
       if (planned.length) {
         setDestinationBusy(true);
-        setDestinationAnalysis(await analyzeDestination(handle, planned.filter((e) => e.included !== false)));
+        setDestinationAnalysis(await analyzeDestination(handle, planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)))));
       }
       if (runAfter) await produce(true, handle);
     } catch (e) {
@@ -246,7 +275,7 @@ export default function Home() {
         !confirm("Confirmer le remplacement des conflits ?")
       )
         return;
-      const u = planned.filter((e) => e.included !== false);
+      const u = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
       if (folder) {
         const root = selected || destination;
         if (!root) { await chooseDestination(true); return; }
@@ -540,6 +569,14 @@ export default function Home() {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
+            {planned.length > 0 && (
+              <div className="selectionbar">
+                <strong>{selectedCount} sur {planned.length} sélectionné(s)</strong>
+                <button onClick={() => setAllSelection("all")}>Tout sélectionner</button>
+                <button onClick={() => setAllSelection("none")}>Tout exclure</button>
+                <button onClick={() => setAllSelection("invert")}>Inverser</button>
+              </div>
+            )}
             {error && (
               <div className="v2error">
                 <Info />
@@ -570,12 +607,21 @@ export default function Home() {
                 {tree.map(([f, is]) => (
                   <div className="treegroup" key={f}>
                     <h3>
+                      <input
+                        type="checkbox"
+                        aria-label={`Inclure le dossier ${f || "Racine"}`}
+                        checked={planned.filter((entry) => {
+                          const path = entry.planned || entry.name;
+                          return f ? path.startsWith(`${f}/`) : !path.includes("/");
+                        }).every((entry) => !excluded.has(entryKey(entry)))}
+                        onChange={() => toggleFolder(f)}
+                      />
                       <FolderOpen />
-                      {f}
+                      {f ? f.replaceAll("/", " / ") : "Racine"}
                       <span>{is.length}</span>
                     </h3>
                     {is.map((e, i) => (
-                      <Row e={e} key={i} />
+                      <Row e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} />
                     ))}
                   </div>
                 ))}
@@ -583,7 +629,7 @@ export default function Home() {
             ) : (
               <div className="tree listview">
                 {filtered.map((e, i) => (
-                  <Row e={e} key={i} />
+                  <Row e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} />
                 ))}
               </div>
             )}
@@ -597,7 +643,7 @@ export default function Home() {
               </div>
               <button
                 className="folderbtn"
-                disabled={!planned.length || busy}
+                disabled={!selectedCount || busy}
                 onClick={() => produce(true)}
               >
                 {destination ? "Enregistrer dans ce dossier" : "Choisir un dossier"}
@@ -605,7 +651,7 @@ export default function Home() {
               {busy && progress && <button className="cancelbtn" onClick={() => abortRef.current?.abort()}><XCircle />Annuler</button>}
               <button
                 className="downloadbtn"
-                disabled={!planned.length || busy}
+                disabled={!selectedCount || busy}
                 onClick={() => produce()}
               >
                 <Download />
@@ -998,7 +1044,7 @@ function Panel(p: any) {
     </div>
   );
 }
-function Row({ e }: { e: SmartEntry }) {
+function Row({ e, excluded, toggle }: { e: SmartEntry; excluded: boolean; toggle: () => void }) {
   const c: Record<string, string> = {
     "same-name-same-content": "Même nom et contenu",
     "same-name-different-content": "Même nom, contenu différent",
@@ -1006,9 +1052,10 @@ function Row({ e }: { e: SmartEntry }) {
   };
   return (
     <div
-      className={`v2row ${e.collision ? "duplicate" : ""}`}
+      className={`v2row ${e.collision ? "duplicate" : ""} ${excluded ? "excluded" : ""}`}
       title={e.explanation}
     >
+      <input type="checkbox" checked={!excluded} onChange={toggle} aria-label={`Inclure ${(e.planned || e.name).split("/").pop()}`} />
       <i>
         <File />
       </i>
