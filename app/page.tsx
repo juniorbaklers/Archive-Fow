@@ -116,7 +116,9 @@ export default function Home() {
     [bulkPrefix, setBulkPrefix] = useState(""),
     [folderMode, setFolderMode] = useState<"auto" | "choose">("choose"),
     [includeHidden, setIncludeHidden] = useState(false),
-    [folderArchives, setFolderArchives] = useState<FolderArchive[]>([]);
+    [folderArchives, setFolderArchives] = useState<FolderArchive[]>([]),
+    [preserveRoot, setPreserveRoot] = useState(true),
+    [preserveEmpty, setPreserveEmpty] = useState(true);
   const input = useRef<HTMLInputElement>(null),
     folderInput = useRef<HTMLInputElement>(null),
     jsonInput = useRef<HTMLInputElement>(null),
@@ -251,6 +253,41 @@ export default function Home() {
     if (!found.length) { setError("Aucune archive compatible trouvée dans ce dossier."); return; }
     if (folderMode === "auto") await processFolderArchives(found);
     else setFolderArchives(found);
+  }
+  async function addCreateFolder(l: FileList | null) {
+    if (!l?.length) return;
+    setBusy(true); setError("");
+    try {
+      const files = Array.from(l), first = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath || files[0].name;
+      const rootName = first.split("/")[0];
+      const imported = await Promise.all(files.map(async (file) => {
+        const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const path = relative.split("/").slice(1).join("/");
+        return { name: path || file.name, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
+      }));
+      setSources(files); setEntries(await hashEntries(imported));
+    } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
+    finally { setBusy(false); }
+  }
+  async function pickCompleteCreateFolder() {
+    const picker = (window as any).showDirectoryPicker as undefined | (() => Promise<FileSystemDirectoryHandle>);
+    if (!picker) { folderInput.current?.click(); return; }
+    try {
+      const root = await picker(), files: File[] = [], imported: ArchiveEntry[] = [];
+      const walk = async (dir: FileSystemDirectoryHandle, parts: string[]) => {
+        if (preserveEmpty && parts.length) imported.push({ name: parts.join("/"), size: 0, data: new Uint8Array(), source: root.name, directory: true, rootless: !preserveRoot });
+        for await (const [itemName, handle] of (dir as any).entries()) {
+          if (handle.kind === "directory") await walk(handle, [...parts, itemName]);
+          else {
+            const file = await handle.getFile(); files.push(file);
+            imported.push({ name: [...parts, itemName].join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: root.name, rootless: !preserveRoot });
+          }
+        }
+      };
+      setBusy(true); setError(""); await walk(root, []);
+      setSources(files); setEntries(await hashEntries(imported));
+    } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
+    finally { setBusy(false); }
   }
   function reset(m?: Mode) {
     if (m) setMode(m);
@@ -518,7 +555,7 @@ export default function Home() {
                 }
                 onChange={(e) => addFiles(e.target.files)}
               />
-              <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => addFolder(e.target.files)} />
+              <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => mode === "create" ? addCreateFolder(e.target.files) : addFolder(e.target.files)} />
               <button
                 className="dropmini"
                 onClick={() => input.current?.click()}
@@ -538,6 +575,14 @@ export default function Home() {
                   <label><input type="radio" checked={folderMode === "choose"} onChange={() => setFolderMode("choose")} /> Choisir les archives avant analyse</label>
                   <label><input type="radio" checked={folderMode === "auto"} onChange={() => setFolderMode("auto")} /> Analyser automatiquement</label>
                   <label title="Recommandé pour éviter les fichiers inutiles et sensibles"><input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} /> Inclure les dossiers cachés et système</label>
+                </div>
+              )}
+              {mode === "create" && (
+                <div className="folderimport createfolder">
+                  <button onClick={pickCompleteCreateFolder}><FolderTree />Importer un dossier complet</button>
+                  <label><input type="checkbox" checked={preserveRoot} onChange={(e) => setPreserveRoot(e.target.checked)} /> Conserver le dossier racine</label>
+                  <label><input type="checkbox" checked={preserveEmpty} onChange={(e) => setPreserveEmpty(e.target.checked)} /> Conserver les dossiers vides</label>
+                  <small>Vous pourrez exclure les fichiers ou sous-dossiers dans la simulation.</small>
                 </div>
               )}
               {folderArchives.length > 0 && (
@@ -1168,9 +1213,7 @@ function Row({ e, excluded, toggle }: { e: SmartEntry; excluded: boolean; toggle
       title={e.explanation}
     >
       <input type="checkbox" checked={!excluded} onChange={toggle} aria-label={`Inclure ${(e.planned || e.name).split("/").pop()}`} />
-      <i>
-        <File />
-      </i>
+      <i>{e.directory ? <FolderOpen /> : <File />}</i>
       <div>
         <b>{(e.planned || e.name).split("/").pop()}</b>
         <small>
