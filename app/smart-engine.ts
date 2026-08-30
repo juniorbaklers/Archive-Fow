@@ -309,7 +309,9 @@ export function enrichEntries(
       .sort((a, b) => a.priority - b.priority),
     hashes = new Map<string, SmartEntry>(),
     names = new Map<string, SmartEntry>(),
-    familyMap = new Map<string, Set<string>>();
+    familyMap = new Map<string, Set<string>>(),
+    renamedFolders = new Map<string, string>();
+  let folderCounter = 0;
   for (const e of entries) {
     const x = ext(e.name),
       stem = fileBase(e.name).toLowerCase();
@@ -348,20 +350,38 @@ export function enrichEntries(
       apply = (template: string) =>
         template.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`),
       parts = e.name.replace(/\\/g, "/").split("/").filter(Boolean),
-      renamePart = (part: string, isFile: boolean) => {
+      renamePart = (part: string, isFile: boolean, folderKey = "") => {
+        if (!isFile && renamedFolders.has(folderKey))
+          return renamedFolders.get(folderKey)!;
         const partExt = isFile ? ext(part) : "",
           stem = partExt ? part.slice(0, -partExt.length - 1) : part;
         vars.nom = stem;
+        if (!isFile) {
+          folderCounter += 1;
+          vars.numero = String(folderCounter).padStart(3, "0");
+          vars.compteur = String(folderCounter);
+        } else {
+          vars.numero = String(index + 1).padStart(3, "0");
+          vars.compteur = String(index + 1);
+        }
         const next = cleanName(
           `${rename.prefix}${apply(rename.pattern)}${rename.suffix}`,
           rename,
         );
-        return isFile && partExt && !next.toLowerCase().endsWith(`.${partExt}`)
+        const result = isFile && partExt && !next.toLowerCase().endsWith(`.${partExt}`)
           ? `${next}.${partExt}`
           : next;
+        if (!isFile) renamedFolders.set(folderKey, result);
+        return result;
       },
       internal = renameEnabled
-        ? parts.map((part, i) => renamePart(part, i === parts.length - 1)).join("/")
+        ? parts.map((part, i) =>
+            renamePart(
+              part,
+              i === parts.length - 1,
+              `${sourceRoot}/${parts.slice(0, i + 1).join("/")}`.toLowerCase(),
+            ),
+          ).join("/")
         : parts.join("/"),
       folder = rule ? apply(rule.destination) : "",
       planned = (classify
