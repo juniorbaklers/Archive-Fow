@@ -973,6 +973,8 @@ function Row({ e }: { e: SmartEntry }) {
       </div>
       {e.collision ? (
         <span className="dup">{c[e.collision]}</span>
+      ) : e.contentMatch ? (
+        <span className="shared">Identique dans une autre archive</span>
       ) : (
         <CheckCircle2 />
       )}
