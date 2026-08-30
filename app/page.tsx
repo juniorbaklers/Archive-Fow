@@ -18,6 +18,8 @@ import {
   ShieldCheck,
   Trash2,
   UploadCloud,
+  HardDrive,
+  XCircle,
 } from "lucide-react";
 import {
   ArchiveEntry,
@@ -27,8 +29,8 @@ import {
   makeTarGz,
   makeZip,
   readArchive,
-  saveToFolder,
 } from "./archive-utils";
+import { analyzeDestination, DestinationAnalysis, pickDestination, writeToDestination } from "./destination-utils";
 import {
   CategoryDef,
   CollisionPolicy,
@@ -87,9 +89,14 @@ export default function Home() {
     [rename, setRename] = useState<RenameOptions>(DEF),
     [policy, setPolicy] = useState<CollisionPolicy>("keep-both"),
     [classify, setClassify] = useState(false),
-    [renameEnabled, setRenameEnabled] = useState(false);
+    [renameEnabled, setRenameEnabled] = useState(false),
+    [destination, setDestination] = useState<FileSystemDirectoryHandle | null>(null),
+    [destinationAnalysis, setDestinationAnalysis] = useState<DestinationAnalysis | null>(null),
+    [destinationBusy, setDestinationBusy] = useState(false),
+    [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null);
   const input = useRef<HTMLInputElement>(null),
-    jsonInput = useRef<HTMLInputElement>(null);
+    jsonInput = useRef<HTMLInputElement>(null),
+    abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     try {
       setHistory(
@@ -188,6 +195,22 @@ export default function Home() {
     setSources([]);
     setEntries([]);
     setError("");
+    setDestinationAnalysis(null);
+  }
+
+  async function chooseDestination(runAfter = false) {
+    setError("");
+    try {
+      const handle = await pickDestination();
+      setDestination(handle);
+      if (planned.length) {
+        setDestinationBusy(true);
+        setDestinationAnalysis(await analyzeDestination(handle, planned.filter((e) => e.included !== false)));
+      }
+      if (runAfter) await produce(true, handle);
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Dossier inaccessible");
+    } finally { setDestinationBusy(false); }
   }
   function hist(a: string, f: string) {
     const n = [
@@ -203,7 +226,7 @@ export default function Home() {
     setHistory(n);
     localStorage.setItem("archiveflow-history", JSON.stringify(n));
   }
-  async function produce(folder = false) {
+  async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
     setBusy(true);
     const j = {
@@ -225,7 +248,20 @@ export default function Home() {
         return;
       const u = planned.filter((e) => e.included !== false);
       if (folder) {
-        await saveToFolder(u);
+        const root = selected || destination;
+        if (!root) { await chooseDestination(true); return; }
+        const analysis = await analyzeDestination(root, u);
+        setDestinationAnalysis(analysis);
+        const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
+        if (policy === "replace-confirm" && dangerous.length && !confirm(`Remplacer explicitement ${dangerous.length} fichier(s) existant(s) ?`)) return;
+        const controller = new AbortController(); abortRef.current = controller;
+        setProgress({ written: 0, skipped: 0, current: "Préparation" });
+        const journal = { ...j, destination: root.name, written: 0, skipped: 0 };
+        const result = await writeToDestination(root, u, policy, controller.signal, (written, skipped, current) => {
+          setProgress({ written, skipped, current });
+          localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
+        });
+        localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, status: "terminé" }));
         hist("Organisation", "Dossier");
       } else {
         let d: Uint8Array, n: string, m: string;
@@ -254,8 +290,11 @@ export default function Home() {
         "archiveflow-journal",
         JSON.stringify({ ...j, status: "erreur" }),
       );
-      setError(e instanceof Error ? e.message : "Opération impossible");
+      const cancelled = e instanceof DOMException && e.name === "AbortError";
+      setError(cancelled ? "Opération annulée. Les fichiers déjà écrits sont conservés dans le journal." : e instanceof Error ? e.message : "Opération impossible");
     } finally {
+      abortRef.current = null;
+      setProgress(null);
       setBusy(false);
     }
   }
@@ -462,6 +501,11 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+              <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}>
+                <HardDrive />
+                {destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}
+              </button>
+              {destination && <small className="destinationhint">Vous pourrez aussi le changer après la simulation.</small>}
             </section>
           </aside>
           <section className="preview">
@@ -500,6 +544,15 @@ export default function Home() {
               <div className="v2error">
                 <Info />
                 {error}
+              </div>
+            )}
+            {destination && planned.length > 0 && (
+              <div className="destinationcheck">
+                <HardDrive />
+                <div>
+                  <b>{destinationBusy ? "Analyse de la destination…" : `Destination vérifiée : ${destination.name}`}</b>
+                  <small>{destinationAnalysis ? `${destinationAnalysis.conflicts.length} signalement(s) • ${formatBytes(destinationAnalysis.requiredBytes)} requis • espace libre non accessible par le navigateur` : "L’analyse sera effectuée avant toute écriture."}</small>
+                </div>
               </div>
             )}
             {busy ? (
@@ -547,8 +600,9 @@ export default function Home() {
                 disabled={!planned.length || busy}
                 onClick={() => produce(true)}
               >
-                Choisir un dossier
+                {destination ? "Enregistrer dans ce dossier" : "Choisir un dossier"}
               </button>
+              {busy && progress && <button className="cancelbtn" onClick={() => abortRef.current?.abort()}><XCircle />Annuler</button>}
               <button
                 className="downloadbtn"
                 disabled={!planned.length || busy}
