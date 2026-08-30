@@ -7,6 +7,8 @@ export type ArchiveEntry = {
   hash?: string;
   duplicate?: boolean;
   planned?: string;
+  directory?: boolean;
+  rootless?: boolean;
 };
 const u16 = (v: DataView, o: number) => v.getUint16(o, true),
   u32 = (v: DataView, o: number) => v.getUint32(o, true);
@@ -198,8 +200,9 @@ export function makeZip(entries: ArchiveEntry[]) {
   let localSize = 0,
     centralSize = 0;
   for (const f of entries) {
-    const data = f.data,
-      name = enc.encode(safe(f.planned || f.name)),
+    const data = f.directory ? new Uint8Array() : f.data,
+      cleanName = safe(f.planned || f.name) + (f.directory ? "/" : ""),
+      name = enc.encode(cleanName),
       crc = crc32(data),
       localHeader = new Uint8Array(30),
       lv = new DataView(localHeader.buffer);
@@ -226,6 +229,7 @@ export function makeZip(entries: ArchiveEntry[]) {
     cv.setUint32(20, data.length, true);
     cv.setUint32(24, data.length, true);
     cv.setUint16(28, name.length, true);
+    if (f.directory) cv.setUint32(38, 0x10, true);
     cv.setUint32(42, entryOffset, true);
     central.push(centralHeader, name);
     centralSize += centralHeader.length + name.length;
@@ -251,9 +255,9 @@ function textField(text: string, length: number) {
 export function makeTar(entries: ArchiveEntry[]) {
   const blocks: Uint8Array[] = [];
   for (const e of entries) {
-    const data = e.data,
+    const data = e.directory ? new Uint8Array() : e.data,
       h = new Uint8Array(512),
-      name = safe(e.planned || e.name);
+      name = safe(e.planned || e.name) + (e.directory ? "/" : "");
     h.set(textField(name, 100), 0);
     h.set(textField("0000644\0", 8), 100);
     h.set(textField("0000000\0", 8), 108);
@@ -269,7 +273,7 @@ export function makeTar(entries: ArchiveEntry[]) {
       136,
     );
     h.fill(32, 148, 156);
-    h[156] = 48;
+    h[156] = e.directory ? 53 : 48;
     h.set(textField("ustar\0", 6), 257);
     h.set(textField("00", 2), 263);
     const sum = h.reduce((a, b) => a + b, 0);
@@ -293,6 +297,7 @@ export async function hashEntries(entries: ArchiveEntry[]) {
   const seen = new Map<string, number>();
   return Promise.all(
     entries.map(async (e) => {
+      if (e.directory) return { ...e, hash: undefined, duplicate: false };
       const digest = await crypto.subtle.digest(
           "SHA-256",
           e.data as BufferSource,
