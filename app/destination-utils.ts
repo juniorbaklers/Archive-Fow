@@ -42,6 +42,10 @@ export async function analyzeDestination(root: FileSystemDirectoryHandle, entrie
     }
     if (blocked) continue;
     const final = await existingKind(dir, parts.at(-1)!);
+    if (entry.directory) {
+      if (final?.kind === "file") conflicts.push({ entryPath: parts.join("/"), existingPath: parts.join("/"), kind: "folder-vs-file" });
+      continue;
+    }
     if (final?.kind === "directory") conflicts.push({ entryPath: parts.join("/"), existingPath: parts.join("/"), kind: "file-vs-folder" });
     else if (final?.kind === "file") {
       const same = (entry.hash || await digest(entry.data as BufferSource)) === await digest(await (await final.handle.getFile()).arrayBuffer());
@@ -70,6 +74,13 @@ export async function writeToDestination(root: FileSystemDirectoryHandle, entrie
       dir = found?.kind === "directory" ? found.handle : await dir.getDirectoryHandle(part, { create: true });
     }
     if (impossible) { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
+    if (entry.directory) {
+      const folder = parts.at(-1)!;
+      const found = await existingKind(dir, folder);
+      if (!found) await dir.getDirectoryHandle(folder, { create: true });
+      else if (found.kind === "file") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
+      written++; onProgress(written, skipped, parts.join("/")); continue;
+    }
     let filename = parts.at(-1)!; const found = await existingKind(dir, filename);
     if (found) {
       if (found.kind === "directory" || policy === "skip") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
