@@ -20,6 +20,8 @@ import {
   UploadCloud,
   HardDrive,
   XCircle,
+  ArrowUpDown,
+  Filter,
 } from "lucide-react";
 import {
   ArchiveEntry,
@@ -63,6 +65,7 @@ const DEF: RenameOptions = {
   maxLength: 120,
 };
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
+type BulkOverride = { category?: string; folder?: string; prefix?: string };
 function dl(data: Uint8Array, name: string, type: string) {
   const u = URL.createObjectURL(new Blob([data as BlobPart], { type })),
     a = document.createElement("a");
@@ -96,6 +99,18 @@ export default function Home() {
     [destinationBusy, setDestinationBusy] = useState(false),
     [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState("name"),
+    [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
+    [categoryFilter, setCategoryFilter] = useState("all"),
+    [sourceFilter, setSourceFilter] = useState("all"),
+    [selectionFilter, setSelectionFilter] = useState("all"),
+    [minSize, setMinSize] = useState(""),
+    [maxSize, setMaxSize] = useState(""),
+    [filtersOpen, setFiltersOpen] = useState(false),
+    [overrides, setOverrides] = useState<Record<string, BulkOverride>>({}),
+    [bulkCategory, setBulkCategory] = useState(""),
+    [bulkFolder, setBulkFolder] = useState(""),
+    [bulkPrefix, setBulkPrefix] = useState("");
   const input = useRef<HTMLInputElement>(null),
     jsonInput = useRef<HTMLInputElement>(null),
     abortRef = useRef<AbortController | null>(null);
@@ -132,7 +147,7 @@ export default function Home() {
       ),
     [rules, cats, rename, policy, classify, renameEnabled],
   );
-  const planned = useMemo(
+  const basePlanned = useMemo(
       () =>
         enrichEntries(
           entries,
@@ -145,9 +160,24 @@ export default function Home() {
         ),
       [entries, rules, cats, rename, policy, classify, renameEnabled],
     ),
-    filtered = planned.filter((e) =>
-      (e.planned || e.name).toLowerCase().includes(query.toLowerCase()),
-    ),
+    planned = useMemo(() => basePlanned.map((entry) => {
+      const override = overrides[entryKey(entry)];
+      if (!override) return entry;
+      const path = entry.planned || entry.name, parts = path.split("/"), file = parts.pop()!, renamed = override.prefix ? `${override.prefix}${file}` : file;
+      return { ...entry, category: override.category || entry.category, planned: override.folder ? `${override.folder.replace(/^\/+|\/+$/g, "")}/${renamed}` : [...parts, renamed].join("/") };
+    }), [basePlanned, overrides]),
+    filtered = useMemo(() => planned.filter((e) => {
+      const selected = !excluded.has(entryKey(e)), sizeMb = e.size / 1048576;
+      return (e.planned || e.name).toLowerCase().includes(query.toLowerCase())
+        && (categoryFilter === "all" || e.category === categoryFilter)
+        && (sourceFilter === "all" || e.source === sourceFilter)
+        && (selectionFilter === "all" || (selectionFilter === "selected" ? selected : !selected))
+        && (!minSize || sizeMb >= Number(minSize)) && (!maxSize || sizeMb <= Number(maxSize));
+    }).sort((a, b) => {
+      const values = (e: SmartEntry) => sortBy === "size" ? e.size : sortBy === "date" ? (e.date?.getTime() || 0) : sortBy === "category" ? e.category : sortBy === "source" ? e.source : (e.planned || e.name).toLowerCase();
+      const av = values(a), bv = values(b), result = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDirection === "asc" ? result : -result;
+    }), [planned, excluded, query, categoryFilter, sourceFilter, selectionFilter, minSize, maxSize, sortBy, sortDirection]),
     selectedCount = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e))).length,
     dupes = planned.filter((e) => e.collision).length,
     incomplete = planned.filter((e) => e.familyIncomplete).length,
@@ -198,6 +228,19 @@ export default function Home() {
     setError("");
     setDestinationAnalysis(null);
     setExcluded(new Set());
+    setOverrides({});
+  }
+
+  function applyBulk(kind: "category" | "folder" | "prefix") {
+    const value = kind === "category" ? bulkCategory : kind === "folder" ? bulkFolder : bulkPrefix;
+    if (!value.trim()) return;
+    setOverrides((current) => {
+      const next = { ...current };
+      planned.filter((entry) => !excluded.has(entryKey(entry))).forEach((entry) => {
+        next[entryKey(entry)] = { ...next[entryKey(entry)], [kind]: value.trim() };
+      });
+      return next;
+    });
   }
 
   function setAllSelection(action: "all" | "none" | "invert") {
@@ -568,13 +611,34 @@ export default function Home() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
+              <button className={filtersOpen ? "on" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter />Filtres</button>
             </div>
+            {filtersOpen && planned.length > 0 && (
+              <div className="advancedfilters">
+                <label>Tri<select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="name">Nom</option><option value="size">Taille</option><option value="date">Date</option><option value="category">Catégorie</option><option value="source">Archive source</option></select></label>
+                <label>Ordre<select value={sortDirection} onChange={(e) => setSortDirection(e.target.value as "asc" | "desc")}><option value="asc">Croissant</option><option value="desc">Décroissant</option></select></label>
+                <label>Catégorie<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}><option value="all">Toutes</option>{[...new Set(planned.map((e) => e.category))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label>Archive<select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}><option value="all">Toutes</option>{[...new Set(planned.map((e) => e.source))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label>Sélection<select value={selectionFilter} onChange={(e) => setSelectionFilter(e.target.value)}><option value="all">Tous</option><option value="selected">Inclus</option><option value="excluded">Exclus</option></select></label>
+                <label>Taille min. (Mo)<input type="number" min="0" value={minSize} onChange={(e) => setMinSize(e.target.value)} /></label>
+                <label>Taille max. (Mo)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
+                <button onClick={() => { setQuery(""); setCategoryFilter("all"); setSourceFilter("all"); setSelectionFilter("all"); setMinSize(""); setMaxSize(""); setSortBy("name"); setSortDirection("asc"); }}>Réinitialiser</button>
+              </div>
+            )}
             {planned.length > 0 && (
               <div className="selectionbar">
                 <strong>{selectedCount} sur {planned.length} sélectionné(s)</strong>
                 <button onClick={() => setAllSelection("all")}>Tout sélectionner</button>
                 <button onClick={() => setAllSelection("none")}>Tout exclure</button>
                 <button onClick={() => setAllSelection("invert")}>Inverser</button>
+              </div>
+            )}
+            {planned.length > 0 && (
+              <div className="bulkbar">
+                <span><ArrowUpDown /><b>Modification en masse</b><small>sur les {selectedCount} éléments inclus</small></span>
+                <div><select value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)}><option value="">Catégorie…</option>{[...DEFAULT_CATEGORIES, ...cats].map((category) => <option key={category.id}>{category.name}</option>)}</select><button onClick={() => applyBulk("category")}>Appliquer</button></div>
+                <div><input placeholder="Déplacer vers le dossier…" value={bulkFolder} onChange={(e) => setBulkFolder(e.target.value)} /><button onClick={() => applyBulk("folder")}>Déplacer</button></div>
+                <div><input placeholder="Préfixe de renommage…" value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} /><button onClick={() => applyBulk("prefix")}>Renommer</button></div>
               </div>
             )}
             {error && (
