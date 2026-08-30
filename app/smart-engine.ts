@@ -333,8 +333,9 @@ export function enrichEntries(
       original = fileBase(e.name),
       extension = ext(e.name),
       sourceRoot =
-        e.source.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "") ||
-        "Archive",
+        e.rootless
+          ? ""
+          : e.source.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "") || "Archive",
       vars: { [k: string]: string } = {
         nom: original,
         source: sourceRoot,
@@ -387,7 +388,7 @@ export function enrichEntries(
       planned = (classify
         ? `${sourceRoot}/${folder}/${internal}`
         : `${sourceRoot}/${internal}`
-      ).replace(/\/+/g, "/");
+      ).replace(/\/+/g, "/").replace(/^\/+/, "");
     let collision: SmartEntry["collision"],
       contentMatch = false;
     const sameName = names.get(planned.toLowerCase()),
