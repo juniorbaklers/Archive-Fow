@@ -223,6 +223,8 @@ export default function Home() {
     dupes = planned.filter((e) => e.collision).length,
     incomplete = planned.filter((e) => e.familyIncomplete).length,
     shortenedPaths = planned.filter((e) => e.pathAdjusted).length,
+    protectedFiles = planned.filter((e) => e.integrityProtected).length,
+    unsafeProtectedPaths = planned.filter((e) => e.pathUnsafe).length,
     total = sources.reduce((s, f) => s + f.size, 0),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
@@ -806,6 +808,9 @@ export default function Home() {
             {shortenedPaths > 0 && (
               <div className="pathwarning"><ShieldCheck /><div><b>{shortenedPaths} chemin(s) trop long(s) corrigé(s)</b><small>Les noms sont raccourcis de façon stable, les extensions et les familles de fichiers restent cohérentes.</small></div></div>
             )}
+            {protectedFiles > 0 && (
+              <div className="integritynotice"><ShieldCheck /><div><b>Projet SIG protégé : {protectedFiles} élément(s)</b><small>Les noms internes sont conservés pour ne pas casser les liens des couches QGIS/ArcGIS.{unsafeProtectedPaths ? ` ${unsafeProtectedPaths} chemin(s) reste(nt) long(s) : choisissez un dossier de destination proche de la racine, par exemple C:\\SIG.` : ""}</small></div></div>
+            )}
             {busy ? (
               <div className="v2empty">
                 <RefreshCcw className="spin" />
@@ -1317,6 +1322,8 @@ function Row({ e, excluded, toggle }: { e: SmartEntry; excluded: boolean; toggle
       </div>
       {e.collision ? (
         <span className="dup">{c[e.collision]}</span>
+      ) : e.integrityProtected ? (
+        <span className={e.pathUnsafe ? "integritybadge unsafe" : "integritybadge"}>{e.pathUnsafe ? "Chemin long : destination courte" : "Liens SIG protégés"}</span>
       ) : e.pathAdjusted ? (
         <span className="pathfixed" title={`Avant : ${e.originalPlanned}`}>Chemin Windows corrigé</span>
       ) : e.contentMatch ? (
