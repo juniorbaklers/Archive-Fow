@@ -472,7 +472,7 @@ export function enrichEntries(
     if (collision) {
       if (policy === "skip") included = false;
       else if (policy === "duplicates-folder") final = `Doublons/${safePlanned}`;
-      else if (policy === "rename" || policy === "keep-both") {
+      else if (policy === "rename" || policy === "keep-both" || policy === "replace-confirm") {
         const dot = safePlanned.lastIndexOf("."),
           tag = ` (${index + 1})`;
         final =
@@ -482,6 +482,13 @@ export function enrichEntries(
       }
       if (rename.windowsSafePaths !== false)
         final = makeWindowsSafePath(final, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases, integrityProtected);
+    }
+    if (included) {
+      const originalFinal = final;
+      for (let copy = 2; names.has(final.toLowerCase()); copy += 1) {
+        const dot = originalFinal.lastIndexOf("."), slash = originalFinal.lastIndexOf("/"), tag = `__copie_${copy}`;
+        final = dot > slash ? `${originalFinal.slice(0, dot)}${tag}${originalFinal.slice(dot)}` : `${originalFinal}${tag}`;
+      }
     }
     const out: SmartEntry = {
       ...e,
