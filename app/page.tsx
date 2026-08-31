@@ -70,6 +70,7 @@ const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 type BulkOverride = { category?: string; folder?: string; prefix?: string };
 type FolderArchive = { file: File; path: string; included: boolean };
 type SaveReport = { detected: number; selected: number; saved: number; skipped: number; complete: boolean };
+type ArchiveReport = { id: string; name: string; root: string; count: number; status: "ok" | "empty" | "error"; message?: string };
 type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
 type FormatSupport = {
   format: string;
@@ -121,6 +122,7 @@ export default function Home() {
     [formatsOpen, setFormatsOpen] = useState(false),
     [preserveAll, setPreserveAll] = useState(true),
     [lastReport, setLastReport] = useState<SaveReport | null>(null),
+    [archiveReports, setArchiveReports] = useState<ArchiveReport[]>([]),
     [tab, setTab] = useState("rules"),
     [query, setQuery] = useState(""),
     [rules, setRules] = useState<SmartRule[]>(DEFAULT_RULES),
@@ -245,13 +247,33 @@ export default function Home() {
     if (!l?.length) return;
     setBusy(true);
     setError("");
+    setLastReport(null);
     try {
       const fs = Array.from(l);
       setSources((p) => (mode === "create" ? [...p, ...fs] : fs));
       let all: ArchiveEntry[] = [];
-      if (mode === "extract")
-        for (const f of fs) all.push(...(await readArchive(f)));
-      else
+      if (mode === "extract") {
+        setEntries([]);
+        const baseNames = fs.map((file) => file.name.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "") || "Archive"), totals = new Map<string, number>();
+        baseNames.forEach((base) => totals.set(base.toLowerCase(), (totals.get(base.toLowerCase()) || 0) + 1));
+        const seen = new Map<string, number>(), reports: ArchiveReport[] = [];
+        for (let index = 0; index < fs.length; index += 1) {
+          const f = fs[index], base = baseNames[index], key = base.toLowerCase(), occurrence = (seen.get(key) || 0) + 1;
+          seen.set(key, occurrence);
+          const root = (totals.get(key) || 0) > 1 ? `${base}__archive_${occurrence}` : base;
+          try {
+            const extracted = await readArchive(f), identified = extracted.map((entry) => ({ ...entry, source: root }));
+            all.push(...identified);
+            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : "Aucun fichier trouvé" });
+          } catch (archiveError) {
+            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
+          }
+        }
+        setArchiveReports(reports);
+        const failures = reports.filter((report) => report.status !== "ok");
+        if (failures.length) setError(`${failures.length} archive(s) n’ont pas été entièrement analysées. Consultez le bilan par archive ci-dessous.`);
+      } else {
+        setArchiveReports([]);
         all = [
           ...entries,
           ...(await Promise.all(
@@ -264,6 +286,7 @@ export default function Home() {
             })),
           )),
         ];
+      }
       setEntries(await hashEntries(all));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analyse impossible");
@@ -277,11 +300,19 @@ export default function Home() {
     setBusy(true); setError("");
     try {
       setSources(chosen.map((item) => item.file));
-      const all: ArchiveEntry[] = [];
-      for (const item of chosen) {
-        const extracted = await readArchive(item.file);
-        all.push(...extracted.map((entry) => ({ ...entry, source: item.path })));
+      setEntries([]);
+      const all: ArchiveEntry[] = [], reports: ArchiveReport[] = [];
+      for (let index = 0; index < chosen.length; index += 1) {
+        const item = chosen[index], root = item.path.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "");
+        try {
+          const extracted = await readArchive(item.file), identified = extracted.map((entry) => ({ ...entry, source: root }));
+          all.push(...identified);
+          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: identified.length, status: identified.length ? "ok" : "empty" });
+        } catch (archiveError) {
+          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
+        }
       }
+      setArchiveReports(reports);
       setEntries(await hashEntries(all));
       setFolderArchives([]);
     } catch (e) { setError(e instanceof Error ? e.message : "Analyse récursive impossible"); }
@@ -340,6 +371,7 @@ export default function Home() {
     setOverrides({});
     setFolderArchives([]);
     setLastReport(null);
+    setArchiveReports([]);
   }
 
   function applyBulk(kind: "category" | "folder" | "prefix") {
@@ -423,6 +455,11 @@ export default function Home() {
   }
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
+    const failedArchives = archiveReports.filter((report) => report.status !== "ok");
+    if (failedArchives.length) {
+      setError(`Opération bloquée : ${failedArchives.length} archive(s) n’ont pas été correctement analysées. Aucun résultat incomplet ne sera créé.`);
+      return;
+    }
     const selectedEntries = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
     const outputFiles = selectedEntries.filter((e) => !e.directory), outputPaths = new Set(outputFiles.map((e) => (e.planned || e.name).toLowerCase()));
     setLastReport(null);
@@ -819,6 +856,9 @@ export default function Home() {
                 <Info />
                 {error}
               </div>
+            )}
+            {archiveReports.length > 0 && (
+              <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong></div>)}</div>
             )}
             {destination && planned.length > 0 && (
               <div className="destinationcheck">
