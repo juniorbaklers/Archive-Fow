@@ -47,6 +47,7 @@ export type SmartEntry = ArchiveEntry & {
   originalPlanned?: string;
   integrityProtected?: boolean;
   pathUnsafe?: boolean;
+  needsPathDecision?: boolean;
 };
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
   {
@@ -452,9 +453,11 @@ export function enrichEntries(
         ? `${sourceRoot}/${folder}/${internal}`
         : `${sourceRoot}/${internal}`
       ).replace(/\/+/g, "/").replace(/^\/+/, "");
-    const safePlanned = rename.windowsSafePaths === false
+    const pathLimit = Math.max(100, rename.relativePathLimit || 180),
+      needsPathDecision = planned.length > pathLimit || planned.split("/").some((part) => part.length > 90),
+      safePlanned = rename.windowsSafePaths === false
         ? planned
-        : makeWindowsSafePath(planned, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases, integrityProtected),
+        : makeWindowsSafePath(planned, pathLimit, safeFamilyBases, integrityProtected),
       pathAdjusted = safePlanned !== planned,
       pathUnsafe = integrityProtected && (safePlanned.length > Math.max(100, rename.relativePathLimit || 180) || safePlanned.split("/").some((part) => part.length > 240));
     let collision: SmartEntry["collision"],
@@ -503,6 +506,7 @@ export function enrichEntries(
       originalPlanned: pathAdjusted ? planned : undefined,
       integrityProtected,
       pathUnsafe,
+      needsPathDecision,
       explanation: rule
         ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`
         : `Arborescence originale conservée dans « ${sourceRoot} »${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`,
