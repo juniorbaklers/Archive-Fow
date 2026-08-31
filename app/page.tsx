@@ -69,6 +69,7 @@ const DEF: RenameOptions = {
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 type BulkOverride = { category?: string; folder?: string; prefix?: string };
 type FolderArchive = { file: File; path: string; included: boolean };
+type SaveReport = { detected: number; selected: number; saved: number; skipped: number; complete: boolean };
 type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
 type FormatSupport = {
   format: string;
@@ -118,6 +119,8 @@ export default function Home() {
     [historyOpen, setHistoryOpen] = useState(false),
     [settings, setSettings] = useState(false),
     [formatsOpen, setFormatsOpen] = useState(false),
+    [preserveAll, setPreserveAll] = useState(true),
+    [lastReport, setLastReport] = useState<SaveReport | null>(null),
     [tab, setTab] = useState("rules"),
     [query, setQuery] = useState(""),
     [rules, setRules] = useState<SmartRule[]>(DEFAULT_RULES),
@@ -169,6 +172,7 @@ export default function Home() {
         setClassify(c.classify || false);
         setRenameEnabled(c.renameEnabled || false);
         setProfile(c.profile || "custom");
+        setPreserveAll(c.preserveAll !== false);
       }
     } catch {}
   }, []);
@@ -184,10 +188,12 @@ export default function Home() {
           classify,
           renameEnabled,
           profile,
+          preserveAll,
         }),
       ),
-    [rules, cats, rename, policy, classify, renameEnabled, profile],
+    [rules, cats, rename, policy, classify, renameEnabled, profile, preserveAll],
   );
+  const effectivePolicy: CollisionPolicy = preserveAll && policy === "skip" ? "keep-both" : policy;
   const basePlanned = useMemo(
       () =>
         enrichEntries(
@@ -195,11 +201,11 @@ export default function Home() {
           rules,
           [...DEFAULT_CATEGORIES, ...cats],
           rename,
-          policy,
+          effectivePolicy,
           classify,
           renameEnabled,
         ),
-      [entries, rules, cats, rename, policy, classify, renameEnabled],
+      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled],
     ),
     planned = useMemo(() => basePlanned.map((entry) => {
       const override = overrides[entryKey(entry)];
@@ -333,6 +339,7 @@ export default function Home() {
     setExcluded(new Set());
     setOverrides({});
     setFolderArchives([]);
+    setLastReport(null);
   }
 
   function applyBulk(kind: "category" | "folder" | "prefix") {
@@ -418,6 +425,7 @@ export default function Home() {
     if (!planned.length) return;
     const selectedEntries = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
     const outputFiles = selectedEntries.filter((e) => !e.directory), outputPaths = new Set(outputFiles.map((e) => (e.planned || e.name).toLowerCase()));
+    setLastReport(null);
     if (outputPaths.size !== outputFiles.length) {
       setError(`Opération bloquée : ${outputFiles.length - outputPaths.size} fichier(s) partageraient encore le même chemin de sortie. Aucun fichier n’a été créé.`);
       return;
@@ -435,7 +443,7 @@ export default function Home() {
     localStorage.setItem("archiveflow-journal", JSON.stringify(j));
     try {
       if (
-        policy === "replace-confirm" &&
+        effectivePolicy === "replace-confirm" &&
         dupes &&
         !confirm("Confirmer le remplacement des conflits ?")
       )
@@ -452,15 +460,17 @@ export default function Home() {
           return;
         }
         const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
-        if (policy === "replace-confirm" && dangerous.length && !confirm(`Remplacer explicitement ${dangerous.length} fichier(s) existant(s) ?`)) return;
+        if (effectivePolicy === "replace-confirm" && dangerous.length && !confirm(`Remplacer explicitement ${dangerous.length} fichier(s) existant(s) ?`)) return;
         const controller = new AbortController(); abortRef.current = controller;
         setProgress({ written: 0, skipped: 0, current: "Préparation" });
         const journal = { ...j, destination: root.name, written: 0, skipped: 0 };
-        const result = await writeToDestination(root, u, policy, controller.signal, (written, skipped, current) => {
+        const result = await writeToDestination(root, u, effectivePolicy, controller.signal, (written, skipped, current) => {
           setProgress({ written, skipped, current });
           localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
         });
         if (result.written + result.skipped !== u.length) throw Error("Contrôle d’intégrité échoué : le nombre d’éléments traités ne correspond pas à la sélection.");
+        const savedFiles = Math.max(0, outputFiles.length - result.skipped);
+        setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: result.skipped, complete: result.skipped === 0 && savedFiles === outputFiles.length });
         localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: u.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
         if (result.skipped) setError(`${result.skipped} élément(s) n’ont pas été écrits en raison de la politique choisie ou d’un conflit de destination. Consultez la simulation avant de recommencer.`);
         hist("Organisation", "Dossier");
@@ -480,6 +490,7 @@ export default function Home() {
           m = "application/zip";
         }
         dl(d, n, m);
+        setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: outputFiles.length, skipped: 0, complete: true });
         hist(mode === "extract" ? "Extraction" : "Création", output);
       }
       localStorage.setItem(
@@ -824,6 +835,9 @@ export default function Home() {
             {protectedFiles > 0 && (
               <div className="integritynotice"><ShieldCheck /><div><b>Projet SIG protégé : {protectedFiles} élément(s)</b><small>Les noms internes sont conservés pour ne pas casser les liens des couches QGIS/ArcGIS.{unsafeProtectedPaths ? ` ${unsafeProtectedPaths} chemin(s) reste(nt) long(s) : choisissez un dossier de destination proche de la racine, par exemple C:\\SIG.` : ""}</small></div></div>
             )}
+            {lastReport && (
+              <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? "Enregistrement complet" : "Enregistrement incomplet"}</b><small>{lastReport.detected} détecté(s) • {lastReport.selected} sélectionné(s) • {lastReport.saved} enregistré(s) • {lastReport.skipped} non enregistré(s)</small></div></div>
+            )}
             {busy ? (
               <div className="v2empty">
                 <RefreshCcw className="spin" />
@@ -948,6 +962,8 @@ export default function Home() {
           setRename={setRename}
           policy={policy}
           setPolicy={setPolicy}
+          preserveAll={preserveAll}
+          setPreserveAll={setPreserveAll}
           exportJson={exportJson}
           importJson={importJson}
           jsonInput={jsonInput}
@@ -1210,6 +1226,7 @@ function Panel(p: any) {
         )}
         {p.tab === "duplicates" && (
           <section>
+            <label className="strictsave"><input type="checkbox" checked={p.preserveAll} onChange={(e) => p.setPreserveAll(e.target.checked)} /><span><b>Mode strict : conserver tous les fichiers</b><small>Recommandé. « Ignorer » devient « Conserver les deux » pour éviter toute disparition.</small></span></label>
             <h3>Politique globale</h3>
             {[
               ["keep-both", "Conserver les deux"],
