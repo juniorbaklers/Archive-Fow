@@ -10,6 +10,29 @@ export type ArchiveEntry = {
   directory?: boolean;
   rootless?: boolean;
 };
+export type SecurityLimits = {
+  maxExpandedBytes: number;
+  maxFiles: number;
+  maxRatio: number;
+  maxDepth: number;
+};
+export const DEFAULT_SECURITY_LIMITS: SecurityLimits = {
+  maxExpandedBytes: 10 * 1024 * 1024 * 1024,
+  maxFiles: 50000,
+  maxRatio: 200,
+  maxDepth: 20,
+};
+function securityError(detail: string) {
+  throw Error(`Archive bloquée par sécurité : ${detail}. Modifiez les limites avancées seulement si vous faites confiance à cette archive.`);
+}
+function checkSecurity(name: string, count: number, total: number, compressed: number, limits: SecurityLimits) {
+  const depth = safe(name).split("/").filter(Boolean).length;
+  if (count > limits.maxFiles) securityError(`plus de ${limits.maxFiles.toLocaleString("fr-FR")} fichiers`);
+  if (total > limits.maxExpandedBytes) securityError(`taille extraite supérieure à ${formatBytes(limits.maxExpandedBytes)}`);
+  if (depth > limits.maxDepth) securityError(`profondeur supérieure à ${limits.maxDepth} dossiers`);
+  const ratio = compressed > 0 ? total / compressed : total > 0 ? Infinity : 0;
+  if (ratio > limits.maxRatio) securityError(`ratio de compression ${Math.round(ratio)}:1 supérieur à ${limits.maxRatio}:1`);
+}
 const u16 = (v: DataView, o: number) => v.getUint16(o, true),
   u32 = (v: DataView, o: number) => v.getUint32(o, true);
 const safe = (n: string) =>
@@ -53,7 +76,7 @@ async function compress(data: Uint8Array, format: "gzip") {
     .pipeThrough(new CompressionStream(format));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-export async function readZip(file: File) {
+export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS) {
   const b = new Uint8Array(await file.arrayBuffer()),
     v = new DataView(b.buffer);
   let end = -1;
@@ -66,7 +89,10 @@ export async function readZip(file: File) {
   let cur = u32(v, end + 16);
   const out: ArchiveEntry[] = [],
     dec = new TextDecoder();
-  for (let i = 0; i < u16(v, end + 10); i++) {
+  const entryCount = u16(v, end + 10);
+  if (entryCount > limits.maxFiles) securityError(`plus de ${limits.maxFiles.toLocaleString("fr-FR")} fichiers`);
+  let expandedTotal = 0, compressedTotal = 0;
+  for (let i = 0; i < entryCount; i++) {
     if (u32(v, cur) !== 0x02014b50) throw Error("Structure ZIP non reconnue.");
     const method = u16(v, cur + 10),
       cs = u32(v, cur + 20),
@@ -82,6 +108,11 @@ export async function readZip(file: File) {
       unixType = (external >>> 16) & 0xf000,
       isDirectory =
         name.endsWith("/") || (external & 0x10) !== 0 || unixType === 0x4000;
+    expandedTotal += size;
+    compressedTotal += cs;
+    checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits);
+    const entryRatio = cs > 0 ? size / cs : size > 0 ? Infinity : 0;
+    if (entryRatio > limits.maxRatio) securityError(`« ${name} » atteint un ratio ${Math.round(entryRatio)}:1 supérieur à ${limits.maxRatio}:1`);
     if (!isDirectory) {
       if (method !== 0 && method !== 8)
         throw Error(`Compression ZIP non prise en charge : ${name}`);
@@ -126,7 +157,7 @@ export function readTarBytes(bytes: Uint8Array, source: string) {
   }
   return out;
 }
-async function readWithLibarchive(file: File): Promise<ArchiveEntry[]> {
+async function readWithLibarchive(file: File, limits: SecurityLimits): Promise<ArchiveEntry[]> {
   const { Archive } = await import("libarchive.js");
   Archive.init({
     workerUrl: `${import.meta.env.BASE_URL}libarchive/worker-bundle.js`,
@@ -145,9 +176,12 @@ async function readWithLibarchive(file: File): Promise<ArchiveEntry[]> {
   await archive.extractFiles();
   const files = await archive.getFilesArray();
   const out: ArchiveEntry[] = [];
+  let total = 0;
   for (const item of files) {
     if (!(item.file instanceof File)) continue;
     const name = safe(`${item.path || ""}${item.file.name}`);
+    total += item.file.size;
+    checkSecurity(name, out.length + 1, total, file.size, limits);
     out.push({
       name,
       size: item.file.size,
@@ -161,15 +195,17 @@ async function readWithLibarchive(file: File): Promise<ArchiveEntry[]> {
   await archive.close();
   return out;
 }
-export async function readArchive(file: File) {
+export async function readArchive(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS) {
   const format = detectFormat(file),
     bytes = new Uint8Array(await file.arrayBuffer());
   if (format === "ZIP") {
     try {
-      const files = await readZip(file);
+      const files = await readZip(file, limits);
       if (files.length) return files;
-    } catch {}
-    return readWithLibarchive(file);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Archive bloquée par sécurité")) throw error;
+    }
+    return readWithLibarchive(file, limits);
   }
   if (format === "TAR") return readTarBytes(bytes, file.name);
   if (format === "TAR.GZ")
@@ -179,7 +215,7 @@ export async function readArchive(file: File) {
     const data = await decompress(bytes, "gzip");
     return [{ name, size: data.length, data, source: file.name }];
   }
-  if (format === "7Z" || format === "RAR") return readWithLibarchive(file);
+  if (format === "7Z" || format === "RAR") return readWithLibarchive(file, limits);
   throw Error("Format non reconnu.");
 }
 function crc32(d: Uint8Array) {
