@@ -63,6 +63,8 @@ const DEF: RenameOptions = {
   replace: "",
   regex: false,
   maxLength: 120,
+  windowsSafePaths: true,
+  relativePathLimit: 180,
 };
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
 type BulkOverride = { category?: string; folder?: string; prefix?: string };
@@ -220,6 +222,7 @@ export default function Home() {
     selectedCount = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e))).length,
     dupes = planned.filter((e) => e.collision).length,
     incomplete = planned.filter((e) => e.familyIncomplete).length,
+    shortenedPaths = planned.filter((e) => e.pathAdjusted).length,
     total = sources.reduce((s, f) => s + f.size, 0),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
@@ -730,7 +733,7 @@ export default function Home() {
                 <h2>Simulation du résultat</h2>
                 <p>
                   {planned.length} fichiers • {dupes} conflits • {incomplete}{" "}
-                  groupes incomplets
+                  groupes incomplets • {shortenedPaths} chemins sécurisés
                 </p>
               </div>
               <div className="viewbuttons">
@@ -799,6 +802,9 @@ export default function Home() {
                   <small>{destinationAnalysis ? `${destinationAnalysis.conflicts.length} signalement(s) • ${formatBytes(destinationAnalysis.requiredBytes)} requis • espace libre non accessible par le navigateur` : "L’analyse sera effectuée avant toute écriture."}</small>
                 </div>
               </div>
+            )}
+            {shortenedPaths > 0 && (
+              <div className="pathwarning"><ShieldCheck /><div><b>{shortenedPaths} chemin(s) trop long(s) corrigé(s)</b><small>Les noms sont raccourcis de façon stable, les extensions et les familles de fichiers restent cohérentes.</small></div></div>
             )}
             {busy ? (
               <div className="v2empty">
@@ -1161,6 +1167,15 @@ function Panel(p: any) {
               />
               Regex
             </label>
+            <label className="tick pathoption">
+              <input type="checkbox" checked={p.rename.windowsSafePaths !== false} onChange={(e) => p.setRename({ ...p.rename, windowsSafePaths: e.target.checked })} />
+              Compatibilité Windows : raccourcir les chemins trop longs
+            </label>
+            <label>
+              Longueur relative maximale
+              <input type="number" min="100" max="220" value={p.rename.relativePathLimit || 180} onChange={(e) => p.setRename({ ...p.rename, relativePathLimit: +e.target.value })} />
+              <small>180 caractères recommandés pour laisser de la place au dossier choisi.</small>
+            </label>
             <div className="renamepreview">
               <b>Aperçu</b>
               <code>
@@ -1302,6 +1317,8 @@ function Row({ e, excluded, toggle }: { e: SmartEntry; excluded: boolean; toggle
       </div>
       {e.collision ? (
         <span className="dup">{c[e.collision]}</span>
+      ) : e.pathAdjusted ? (
+        <span className="pathfixed" title={`Avant : ${e.originalPlanned}`}>Chemin Windows corrigé</span>
       ) : e.contentMatch ? (
         <span className="shared">Identique dans une autre archive</span>
       ) : (
