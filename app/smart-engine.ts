@@ -27,6 +27,8 @@ export type RenameOptions = {
   replace: string;
   regex: boolean;
   maxLength: number;
+  windowsSafePaths: boolean;
+  relativePathLimit: number;
 };
 export type CollisionPolicy =
   "keep-both" | "skip" | "rename" | "duplicates-folder" | "replace-confirm";
@@ -41,6 +43,8 @@ export type SmartEntry = ArchiveEntry & {
     | "same-content-different-name";
   contentMatch?: boolean;
   included?: boolean;
+  pathAdjusted?: boolean;
+  originalPlanned?: string;
 };
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
   {
@@ -295,6 +299,46 @@ function cleanName(value: string, o: RenameOptions) {
   if (reserved.test(n)) n = `_${n}`;
   return n.slice(0, Math.max(12, o.maxLength || 120)) || "fichier";
 }
+function compactHash(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).slice(0, 6);
+}
+function compactSegment(value: string, max: number) {
+  if (value.length <= max) return value;
+  const suffix = `~${compactHash(value)}`;
+  return `${value.slice(0, Math.max(4, max - suffix.length))}${suffix}`;
+}
+function makeWindowsSafePath(path: string, limit: number, familyBases: Map<string, string>) {
+  if (path.length <= limit && path.split("/").every((part) => part.length <= 90)) return path;
+  const originalParts = path.split("/"), parts = [...originalParts];
+  for (let i = 0; i < parts.length - 1; i += 1) parts[i] = compactSegment(parts[i], 36);
+  const file = parts.at(-1) || "fichier", extension = ext(file), stem = extension ? file.slice(0, -extension.length - 1) : file;
+  const folderKey = originalParts.slice(0, -1).join("/").toLowerCase(), familyKey = `${folderKey}/${stem.toLowerCase()}`;
+  let safeStem = familyBases.get(familyKey);
+  if (!safeStem) {
+    safeStem = compactSegment(stem, 46);
+    familyBases.set(familyKey, safeStem);
+  }
+  parts[parts.length - 1] = extension ? `${safeStem}.${extension}` : safeStem;
+  if (parts.join("/").length > limit) {
+    for (let i = 1; i < parts.length - 1; i += 1) parts[i] = compactSegment(parts[i], 18);
+  }
+  if (parts.join("/").length > limit && parts.length > 3) {
+    const middle = originalParts.slice(1, -2).join("/");
+    parts.splice(1, parts.length - 3, `_chemin_${compactHash(middle)}`);
+  }
+  const current = parts.join("/"), overflow = current.length - limit;
+  if (overflow > 0) {
+    const last = parts.at(-1)!, lastExt = ext(last), lastStem = lastExt ? last.slice(0, -lastExt.length - 1) : last;
+    const finalStem = compactSegment(lastStem, Math.max(12, lastStem.length - overflow));
+    parts[parts.length - 1] = lastExt ? `${finalStem}.${lastExt}` : finalStem;
+  }
+  return parts.join("/");
+}
 export function enrichEntries(
   entries: ArchiveEntry[],
   rules: SmartRule[],
@@ -310,7 +354,8 @@ export function enrichEntries(
     hashes = new Map<string, SmartEntry>(),
     names = new Map<string, SmartEntry>(),
     familyMap = new Map<string, Set<string>>(),
-    renamedFolders = new Map<string, string>();
+    renamedFolders = new Map<string, string>(),
+    safeFamilyBases = new Map<string, string>();
   let folderCounter = 0;
   for (const e of entries) {
     const x = ext(e.name),
@@ -389,9 +434,13 @@ export function enrichEntries(
         ? `${sourceRoot}/${folder}/${internal}`
         : `${sourceRoot}/${internal}`
       ).replace(/\/+/g, "/").replace(/^\/+/, "");
+    const safePlanned = rename.windowsSafePaths === false
+        ? planned
+        : makeWindowsSafePath(planned, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases),
+      pathAdjusted = safePlanned !== planned;
     let collision: SmartEntry["collision"],
       contentMatch = false;
-    const sameName = names.get(planned.toLowerCase()),
+    const sameName = names.get(safePlanned.toLowerCase()),
       sameHash = e.hash ? hashes.get(e.hash) : undefined;
     if (sameName)
       collision =
@@ -399,19 +448,21 @@ export function enrichEntries(
           ? "same-name-same-content"
           : "same-name-different-content";
     else if (sameHash) contentMatch = true;
-    let final = planned,
+    let final = safePlanned,
       included = true;
     if (collision) {
       if (policy === "skip") included = false;
-      else if (policy === "duplicates-folder") final = `Doublons/${planned}`;
+      else if (policy === "duplicates-folder") final = `Doublons/${safePlanned}`;
       else if (policy === "rename" || policy === "keep-both") {
-        const dot = planned.lastIndexOf("."),
+        const dot = safePlanned.lastIndexOf("."),
           tag = ` (${index + 1})`;
         final =
-          dot > planned.lastIndexOf("/")
-            ? `${planned.slice(0, dot)}${tag}${planned.slice(dot)}`
-            : `${planned}${tag}`;
+          dot > safePlanned.lastIndexOf("/")
+            ? `${safePlanned.slice(0, dot)}${tag}${safePlanned.slice(dot)}`
+            : `${safePlanned}${tag}`;
       }
+      if (rename.windowsSafePaths !== false)
+        final = makeWindowsSafePath(final, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases);
     }
     const out: SmartEntry = {
       ...e,
@@ -422,9 +473,11 @@ export function enrichEntries(
       collision,
       contentMatch,
       included,
+      pathAdjusted,
+      originalPlanned: pathAdjusted ? planned : undefined,
       explanation: rule
-        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}`
-        : `Arborescence originale conservée dans « ${sourceRoot} »`,
+        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${pathAdjusted ? " • chemin raccourci pour Windows" : ""}`
+        : `Arborescence originale conservée dans « ${sourceRoot} »${pathAdjusted ? " • chemin raccourci pour Windows" : ""}`,
     };
     names.set(final.toLowerCase(), out);
     if (e.hash) hashes.set(e.hash, out);
