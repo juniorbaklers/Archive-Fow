@@ -63,7 +63,7 @@ const DEF: RenameOptions = {
   replace: "",
   regex: false,
   maxLength: 120,
-  windowsSafePaths: true,
+  windowsSafePaths: false,
   relativePathLimit: 180,
 };
 const entryKey = (entry: ArchiveEntry) => `${entry.source}\u0000${entry.name}`;
@@ -71,6 +71,7 @@ type BulkOverride = { category?: string; folder?: string; prefix?: string };
 type FolderArchive = { file: File; path: string; included: boolean };
 type SaveReport = { detected: number; selected: number; saved: number; skipped: number; complete: boolean };
 type ArchiveReport = { id: string; name: string; root: string; count: number; status: "ok" | "empty" | "error"; message?: string };
+type PathDecision = "ask" | "shorten" | "preserve";
 type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
 type FormatSupport = {
   format: string;
@@ -123,6 +124,7 @@ export default function Home() {
     [preserveAll, setPreserveAll] = useState(true),
     [lastReport, setLastReport] = useState<SaveReport | null>(null),
     [archiveReports, setArchiveReports] = useState<ArchiveReport[]>([]),
+    [pathDecision, setPathDecision] = useState<PathDecision>("ask"),
     [tab, setTab] = useState("rules"),
     [query, setQuery] = useState(""),
     [rules, setRules] = useState<SmartRule[]>(DEFAULT_RULES),
@@ -202,12 +204,12 @@ export default function Home() {
           entries,
           rules,
           [...DEFAULT_CATEGORIES, ...cats],
-          rename,
+          { ...rename, windowsSafePaths: pathDecision === "shorten" },
           effectivePolicy,
           classify,
           renameEnabled,
         ),
-      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled],
+      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled, pathDecision],
     ),
     planned = useMemo(() => basePlanned.map((entry) => {
       const override = overrides[entryKey(entry)];
@@ -233,6 +235,7 @@ export default function Home() {
     shortenedPaths = planned.filter((e) => e.pathAdjusted).length,
     protectedFiles = planned.filter((e) => e.integrityProtected).length,
     unsafeProtectedPaths = planned.filter((e) => e.pathUnsafe).length,
+    longPathCandidates = planned.filter((e) => e.needsPathDecision).length,
     total = sources.reduce((s, f) => s + f.size, 0),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
@@ -248,6 +251,7 @@ export default function Home() {
     setBusy(true);
     setError("");
     setLastReport(null);
+    setPathDecision("ask");
     try {
       const fs = Array.from(l);
       setSources((p) => (mode === "create" ? [...p, ...fs] : fs));
@@ -372,6 +376,7 @@ export default function Home() {
     setFolderArchives([]);
     setLastReport(null);
     setArchiveReports([]);
+    setPathDecision("ask");
   }
 
   function applyBulk(kind: "category" | "folder" | "prefix") {
@@ -455,6 +460,10 @@ export default function Home() {
   }
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
+    if (longPathCandidates && pathDecision === "ask") {
+      setError("Choisissez d’abord comment traiter les chemins trop longs. Aucun nom ne sera raccourci sans votre autorisation.");
+      return;
+    }
     const failedArchives = archiveReports.filter((report) => report.status !== "ok");
     if (failedArchives.length) {
       setError(`Opération bloquée : ${failedArchives.length} archive(s) n’ont pas été correctement analysées. Aucun résultat incomplet ne sera créé.`);
@@ -860,6 +869,12 @@ export default function Home() {
             {archiveReports.length > 0 && (
               <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong></div>)}</div>
             )}
+            {longPathCandidates > 0 && pathDecision === "ask" && (
+              <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne modifiera aucun nom sans votre autorisation.</small><span><button onClick={() => setPathDecision("shorten")}>Autoriser le raccourcissement</button><button onClick={() => setPathDecision("preserve")}>Conserver les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
+            )}
+            {longPathCandidates > 0 && pathDecision === "preserve" && (
+              <div className="pathwarning"><ShieldCheck /><div><b>Noms originaux conservés</b><small>Choisissez une destination courte, par exemple C:\\SIG, afin d’éviter l’erreur Windows.</small></div></div>
+            )}
             {destination && planned.length > 0 && (
               <div className="destinationcheck">
                 <HardDrive />
@@ -1241,10 +1256,7 @@ function Panel(p: any) {
               />
               Regex
             </label>
-            <label className="tick pathoption">
-              <input type="checkbox" checked={p.rename.windowsSafePaths !== false} onChange={(e) => p.setRename({ ...p.rename, windowsSafePaths: e.target.checked })} />
-              Compatibilité Windows : raccourcir les chemins trop longs
-            </label>
+            <div className="pathoption">ArchiveFlow demande toujours une autorisation avant de raccourcir un nom.</div>
             <label>
               Longueur relative maximale
               <input type="number" min="100" max="220" value={p.rename.relativePathLimit || 180} onChange={(e) => p.setRename({ ...p.rename, relativePathLimit: +e.target.value })} />
