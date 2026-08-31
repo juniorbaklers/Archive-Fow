@@ -164,7 +164,13 @@ async function readWithLibarchive(file: File): Promise<ArchiveEntry[]> {
 export async function readArchive(file: File) {
   const format = detectFormat(file),
     bytes = new Uint8Array(await file.arrayBuffer());
-  if (format === "ZIP") return readZip(file);
+  if (format === "ZIP") {
+    try {
+      const files = await readZip(file);
+      if (files.length) return files;
+    } catch {}
+    return readWithLibarchive(file);
+  }
   if (format === "TAR") return readTarBytes(bytes, file.name);
   if (format === "TAR.GZ")
     return readTarBytes(await decompress(bytes, "gzip"), file.name);
