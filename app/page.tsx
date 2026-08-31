@@ -416,6 +416,12 @@ export default function Home() {
   }
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
+    const selectedEntries = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
+    const outputFiles = selectedEntries.filter((e) => !e.directory), outputPaths = new Set(outputFiles.map((e) => (e.planned || e.name).toLowerCase()));
+    if (outputPaths.size !== outputFiles.length) {
+      setError(`Opération bloquée : ${outputFiles.length - outputPaths.size} fichier(s) partageraient encore le même chemin de sortie. Aucun fichier n’a été créé.`);
+      return;
+    }
     setBusy(true);
     const j = {
       id: Date.now(),
@@ -434,12 +440,17 @@ export default function Home() {
         !confirm("Confirmer le remplacement des conflits ?")
       )
         return;
-      const u = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
+      const u = selectedEntries;
       if (folder) {
         const root = selected || destination;
         if (!root) { await chooseDestination(true); return; }
         const analysis = await analyzeDestination(root, u);
         setDestinationAnalysis(analysis);
+        const structural = analysis.conflicts.filter((c) => c.kind === "file-vs-folder" || c.kind === "folder-vs-file");
+        if (structural.length) {
+          setError(`Opération bloquée avant écriture : ${structural.length} conflit(s) fichier/dossier empêcheraient de conserver tous les éléments. Choisissez une autre destination ou renommez le dossier en conflit.`);
+          return;
+        }
         const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
         if (policy === "replace-confirm" && dangerous.length && !confirm(`Remplacer explicitement ${dangerous.length} fichier(s) existant(s) ?`)) return;
         const controller = new AbortController(); abortRef.current = controller;
@@ -449,7 +460,9 @@ export default function Home() {
           setProgress({ written, skipped, current });
           localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
         });
-        localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, status: "terminé" }));
+        if (result.written + result.skipped !== u.length) throw Error("Contrôle d’intégrité échoué : le nombre d’éléments traités ne correspond pas à la sélection.");
+        localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: u.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
+        if (result.skipped) setError(`${result.skipped} élément(s) n’ont pas été écrits en raison de la politique choisie ou d’un conflit de destination. Consultez la simulation avant de recommencer.`);
         hist("Organisation", "Dossier");
       } else {
         let d: Uint8Array, n: string, m: string;
