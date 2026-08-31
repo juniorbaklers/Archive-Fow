@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import {
   ArchiveEntry,
+  DEFAULT_SECURITY_LIMITS,
+  SecurityLimits,
   formatBytes,
   hashEntries,
   makeTar,
@@ -125,6 +127,7 @@ export default function Home() {
     [lastReport, setLastReport] = useState<SaveReport | null>(null),
     [archiveReports, setArchiveReports] = useState<ArchiveReport[]>([]),
     [pathDecision, setPathDecision] = useState<PathDecision>("ask"),
+    [security, setSecurity] = useState<SecurityLimits>(DEFAULT_SECURITY_LIMITS),
     [tab, setTab] = useState("rules"),
     [query, setQuery] = useState(""),
     [rules, setRules] = useState<SmartRule[]>(DEFAULT_RULES),
@@ -266,7 +269,7 @@ export default function Home() {
           seen.set(key, occurrence);
           const root = (totals.get(key) || 0) > 1 ? `${base}__archive_${occurrence}` : base;
           try {
-            const extracted = await readArchive(f), identified = extracted.map((entry) => ({ ...entry, source: root }));
+            const extracted = await readArchive(f, security), identified = extracted.map((entry) => ({ ...entry, source: root }));
             all.push(...identified);
             reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : "Aucun fichier trouvé" });
           } catch (archiveError) {
@@ -309,7 +312,7 @@ export default function Home() {
       for (let index = 0; index < chosen.length; index += 1) {
         const item = chosen[index], root = item.path.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "");
         try {
-          const extracted = await readArchive(item.file), identified = extracted.map((entry) => ({ ...entry, source: root }));
+          const extracted = await readArchive(item.file, security), identified = extracted.map((entry) => ({ ...entry, source: root }));
           all.push(...identified);
           reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: identified.length, status: identified.length ? "ok" : "empty" });
         } catch (archiveError) {
@@ -1022,6 +1025,8 @@ export default function Home() {
           exportJson={exportJson}
           importJson={importJson}
           jsonInput={jsonInput}
+          security={security}
+          setSecurity={setSecurity}
         />
       )}
     </main>
@@ -1050,6 +1055,7 @@ function Panel(p: any) {
             ["rules", "Règles"],
             ["rename", "Renommage"],
             ["duplicates", "Doublons"],
+            ["security", "Sécurité"],
             ["categories", "Catégories"],
           ].map((x) => (
             <button
@@ -1303,6 +1309,18 @@ function Panel(p: any) {
               <ShieldCheck />
               Journal de récupération avant génération.
             </p>
+          </section>
+        )}
+        {p.tab === "security" && (
+          <section>
+            <div className="safenote"><ShieldCheck /><div><b>Protection contre les bombes ZIP</b><small>L’archive est bloquée avant la décompression dès qu’une limite est dépassée.</small></div></div>
+            <div className="formgrid securitygrid">
+              <label>Taille extraite maximale (Go)<input type="number" min="1" value={Math.round(p.security.maxExpandedBytes / 1073741824)} onChange={(e) => p.setSecurity({ ...p.security, maxExpandedBytes: Math.max(1, +e.target.value) * 1073741824 })} /></label>
+              <label>Nombre maximal de fichiers<input type="number" min="100" value={p.security.maxFiles} onChange={(e) => p.setSecurity({ ...p.security, maxFiles: Math.max(100, +e.target.value) })} /></label>
+              <label>Ratio de compression maximal<input type="number" min="10" value={p.security.maxRatio} onChange={(e) => p.setSecurity({ ...p.security, maxRatio: Math.max(10, +e.target.value) })} /></label>
+              <label>Profondeur maximale<input type="number" min="1" value={p.security.maxDepth} onChange={(e) => p.setSecurity({ ...p.security, maxDepth: Math.max(1, +e.target.value) })} /></label>
+            </div>
+            <button onClick={() => p.setSecurity(DEFAULT_SECURITY_LIMITS)}>Rétablir les limites équilibrées</button>
           </section>
         )}
         {p.tab === "categories" && (
