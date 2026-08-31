@@ -45,6 +45,8 @@ export type SmartEntry = ArchiveEntry & {
   included?: boolean;
   pathAdjusted?: boolean;
   originalPlanned?: string;
+  integrityProtected?: boolean;
+  pathUnsafe?: boolean;
 };
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
   {
@@ -251,6 +253,10 @@ const fileBase = (n: string) => {
     e = ext(b);
   return e ? b.slice(0, -e.length - 1) : b;
 };
+const familyKeyFor = (entry: ArchiveEntry) => {
+  const normalized = entry.name.replace(/\\/g, "/"), folder = normalized.includes("/") ? normalized.slice(0, normalized.lastIndexOf("/")) : "";
+  return `${entry.source}/${folder}/${fileBase(entry.name)}`.toLowerCase();
+};
 export function categoryFor(name: string, categories: CategoryDef[]) {
   const x = ext(name);
   return (
@@ -312,9 +318,13 @@ function compactSegment(value: string, max: number) {
   const suffix = `~${compactHash(value)}`;
   return `${value.slice(0, Math.max(4, max - suffix.length))}${suffix}`;
 }
-function makeWindowsSafePath(path: string, limit: number, familyBases: Map<string, string>) {
+function makeWindowsSafePath(path: string, limit: number, familyBases: Map<string, string>, preserveInternal = false) {
   if (path.length <= limit && path.split("/").every((part) => part.length <= 90)) return path;
   const originalParts = path.split("/"), parts = [...originalParts];
+  if (preserveInternal) {
+    parts[0] = compactSegment(parts[0], 36);
+    return parts.join("/");
+  }
   for (let i = 0; i < parts.length - 1; i += 1) parts[i] = compactSegment(parts[i], 36);
   const file = parts.at(-1) || "fichier", extension = ext(file), stem = extension ? file.slice(0, -extension.length - 1) : file;
   const folderKey = originalParts.slice(0, -1).join("/").toLowerCase(), familyKey = `${folderKey}/${stem.toLowerCase()}`;
@@ -355,11 +365,13 @@ export function enrichEntries(
     names = new Map<string, SmartEntry>(),
     familyMap = new Map<string, Set<string>>(),
     renamedFolders = new Map<string, string>(),
-    safeFamilyBases = new Map<string, string>();
+    safeFamilyBases = new Map<string, string>(),
+    renamedFamilyBases = new Map<string, string>(),
+    protectedSources = new Set(entries.filter((entry) => ["qgs", "qgz"].includes(ext(entry.name))).map((entry) => entry.source));
   let folderCounter = 0;
   for (const e of entries) {
     const x = ext(e.name),
-      stem = fileBase(e.name).toLowerCase();
+      stem = familyKeyFor(e);
     if (["shp", "shx", "dbf", "prj", "cpg", "qix", "sbn", "sbx"].includes(x)) {
       const set = familyMap.get(stem) || new Set();
       set.add(x);
@@ -370,11 +382,12 @@ export function enrichEntries(
     const category = categoryFor(e.name, categories),
       date = e.date || new Date(),
       rule = classify ? sorted.find((r) => matches(e, category, r)) : undefined,
-      familyStem = fileBase(e.name).toLowerCase(),
+      familyStem = familyKeyFor(e),
       shape = familyMap.get(familyStem),
       family = shape ? `Shapefile : ${fileBase(e.name)}` : undefined,
       familyIncomplete =
         !!shape && !["shp", "shx", "dbf"].every((x) => shape.has(x)),
+      integrityProtected = protectedSources.has(e.source),
       original = fileBase(e.name),
       extension = ext(e.name),
       sourceRoot =
@@ -397,6 +410,7 @@ export function enrichEntries(
         template.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`),
       parts = e.name.replace(/\\/g, "/").split("/").filter(Boolean),
       renamePart = (part: string, isFile: boolean, folderKey = "") => {
+        if (integrityProtected) return part;
         if (!isFile && renamedFolders.has(folderKey))
           return renamedFolders.get(folderKey)!;
         const partExt = isFile ? ext(part) : "",
@@ -410,6 +424,9 @@ export function enrichEntries(
           vars.numero = String(index + 1).padStart(3, "0");
           vars.compteur = String(index + 1);
         }
+        const familyRenameKey = `${e.source}/${parts.slice(0, -1).join("/")}/${stem}`.toLowerCase();
+        if (isFile && shape && renamedFamilyBases.has(familyRenameKey))
+          return `${renamedFamilyBases.get(familyRenameKey)}.${partExt}`;
         const next = cleanName(
           `${rename.prefix}${apply(rename.pattern)}${rename.suffix}`,
           rename,
@@ -418,6 +435,7 @@ export function enrichEntries(
           ? `${next}.${partExt}`
           : next;
         if (!isFile) renamedFolders.set(folderKey, result);
+        if (isFile && shape) renamedFamilyBases.set(familyRenameKey, next);
         return result;
       },
       internal = renameEnabled
@@ -436,8 +454,9 @@ export function enrichEntries(
       ).replace(/\/+/g, "/").replace(/^\/+/, "");
     const safePlanned = rename.windowsSafePaths === false
         ? planned
-        : makeWindowsSafePath(planned, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases),
-      pathAdjusted = safePlanned !== planned;
+        : makeWindowsSafePath(planned, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases, integrityProtected),
+      pathAdjusted = safePlanned !== planned,
+      pathUnsafe = integrityProtected && (safePlanned.length > Math.max(100, rename.relativePathLimit || 180) || safePlanned.split("/").some((part) => part.length > 240));
     let collision: SmartEntry["collision"],
       contentMatch = false;
     const sameName = names.get(safePlanned.toLowerCase()),
@@ -462,7 +481,7 @@ export function enrichEntries(
             : `${safePlanned}${tag}`;
       }
       if (rename.windowsSafePaths !== false)
-        final = makeWindowsSafePath(final, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases);
+        final = makeWindowsSafePath(final, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases, integrityProtected);
     }
     const out: SmartEntry = {
       ...e,
@@ -475,9 +494,11 @@ export function enrichEntries(
       included,
       pathAdjusted,
       originalPlanned: pathAdjusted ? planned : undefined,
+      integrityProtected,
+      pathUnsafe,
       explanation: rule
-        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${pathAdjusted ? " • chemin raccourci pour Windows" : ""}`
-        : `Arborescence originale conservée dans « ${sourceRoot} »${pathAdjusted ? " • chemin raccourci pour Windows" : ""}`,
+        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`
+        : `Arborescence originale conservée dans « ${sourceRoot} »${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`,
     };
     names.set(final.toLowerCase(), out);
     if (e.hash) hashes.set(e.hash, out);
