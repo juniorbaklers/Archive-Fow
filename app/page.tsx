@@ -1053,6 +1053,12 @@ export default function Home() {
                 </span>
                 <small>Aucun écrasement silencieux.</small>
               </div>
+              {mode === "create" && destination && (
+                <label className="renamebeforesave">
+                  Nom du fichier <small>(facultatif)</small>
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="archive-organisee" />
+                </label>
+              )}
               <button
                 className="folderbtn"
                 disabled={!selectedCount || busy}
@@ -1082,19 +1088,35 @@ export default function Home() {
               <h2>Historique local</h2>
               <button onClick={() => setHistoryOpen(false)}>×</button>
             </div>
-            {history.map((h) => (
-              <article key={h.id}>
-                <i>
-                  <History />
-                </i>
-                <span>
-                  <b>
-                    {h.action} — {h.format}
-                  </b>
-                  <small>{h.count} fichiers</small>
-                </span>
-              </article>
-            ))}
+            <p>Conservé uniquement dans ce navigateur.</p>
+            {history.length ? (
+              <>
+                {history.map((h) => (
+                  <article key={h.id}>
+                    <i>
+                      <History />
+                    </i>
+                    <span>
+                      <b>
+                        {h.action} — {h.format}
+                      </b>
+                      <small>{h.count} fichiers</small>
+                    </span>
+                  </article>
+                ))}
+                <button
+                  className="clearhistory"
+                  onClick={() => {
+                    setHistory([]);
+                    localStorage.removeItem("archiveflow-history");
+                  }}
+                >
+                  Effacer l’historique
+                </button>
+              </>
+            ) : (
+              <div className="nohistory">Aucune opération pour l’instant.</div>
+            )}
           </div>
         </div>
       )}
