@@ -333,18 +333,27 @@ export default function Home() {
     if (folderMode === "auto") await processFolderArchives(found);
     else setFolderArchives(found);
   }
+  function uniqueSourceName(base: string) {
+    const used = new Set(entries.map((e) => e.source.toLowerCase()));
+    if (!used.has(base.toLowerCase())) return base;
+    for (let n = 2; ; n += 1) {
+      const candidate = `${base} (${n})`;
+      if (!used.has(candidate.toLowerCase())) return candidate;
+    }
+  }
   async function addCreateFolder(l: FileList | null) {
     if (!l?.length) return;
     setBusy(true); setError("");
     try {
       const files = Array.from(l), first = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath || files[0].name;
-      const rootName = first.split("/")[0];
+      const rootName = uniqueSourceName(first.split("/")[0]);
       const imported = await Promise.all(files.map(async (file) => {
         const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
         const path = relative.split("/").slice(1).join("/");
         return { name: path || file.name, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
       }));
-      setSources(files); setEntries(await hashEntries(imported));
+      setSources((p) => [...p, ...files]);
+      setEntries(await hashEntries([...entries, ...imported]));
     } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); }
   }
@@ -352,19 +361,20 @@ export default function Home() {
     const picker = (window as any).showDirectoryPicker as undefined | (() => Promise<FileSystemDirectoryHandle>);
     if (!picker) { folderInput.current?.click(); return; }
     try {
-      const root = await picker(), files: File[] = [], imported: ArchiveEntry[] = [];
+      const root = await picker(), rootName = uniqueSourceName(root.name), files: File[] = [], imported: ArchiveEntry[] = [];
       const walk = async (dir: FileSystemDirectoryHandle, parts: string[]) => {
-        if (preserveEmpty && parts.length) imported.push({ name: parts.join("/"), size: 0, data: new Uint8Array(), source: root.name, directory: true, rootless: !preserveRoot });
+        if (preserveEmpty && parts.length) imported.push({ name: parts.join("/"), size: 0, data: new Uint8Array(), source: rootName, directory: true, rootless: !preserveRoot });
         for await (const [itemName, handle] of (dir as any).entries()) {
           if (handle.kind === "directory") await walk(handle, [...parts, itemName]);
           else {
             const file = await handle.getFile(); files.push(file);
-            imported.push({ name: [...parts, itemName].join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: root.name, rootless: !preserveRoot });
+            imported.push({ name: [...parts, itemName].join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot });
           }
         }
       };
       setBusy(true); setError(""); await walk(root, []);
-      setSources(files); setEntries(await hashEntries(imported));
+      setSources((p) => [...p, ...files]);
+      setEntries(await hashEntries([...entries, ...imported]));
     } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); }
   }
@@ -674,9 +684,9 @@ export default function Home() {
                 accept={
                   mode === "extract" ? ".zip,.tar,.gz,.tgz,.7z,.rar" : undefined
                 }
-                onChange={(e) => addFiles(e.target.files)}
+                onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
               />
-              <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => mode === "create" ? addCreateFolder(e.target.files) : addFolder(e.target.files)} />
+              <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: "", directory: "" } as any)} onChange={(e) => { (mode === "create" ? addCreateFolder(e.target.files) : addFolder(e.target.files)); e.target.value = ""; }} />
               <button
                 className="dropmini"
                 onClick={() => input.current?.click()}
@@ -703,7 +713,7 @@ export default function Home() {
                   <button onClick={pickCompleteCreateFolder}><FolderTree />Importer un dossier complet</button>
                   <label><input type="checkbox" checked={preserveRoot} onChange={(e) => setPreserveRoot(e.target.checked)} /> Conserver le dossier racine</label>
                   <label><input type="checkbox" checked={preserveEmpty} onChange={(e) => setPreserveEmpty(e.target.checked)} /> Conserver les dossiers vides</label>
-                  <small>Vous pourrez exclure les fichiers ou sous-dossiers dans la simulation.</small>
+                  <small>Répétez « Ajouter des fichiers » ou « Importer un dossier complet » pour combiner plusieurs dossiers ou fichiers dans la même archive. Vous pourrez exclure les fichiers ou sous-dossiers dans la simulation.</small>
                 </div>
               )}
               {folderArchives.length > 0 && (
