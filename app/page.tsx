@@ -207,12 +207,12 @@ export default function Home() {
           entries,
           rules,
           [...DEFAULT_CATEGORIES, ...cats],
-          { ...rename, windowsSafePaths: pathDecision === "shorten" },
+          { ...rename, windowsSafePaths: mode === "create" ? false : pathDecision === "shorten" },
           effectivePolicy,
           classify,
-          renameEnabled,
+          mode === "create" ? false : renameEnabled,
         ),
-      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled, pathDecision],
+      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled, pathDecision, mode],
     ),
     planned = useMemo(() => basePlanned.map((entry) => {
       const override = overrides[entryKey(entry)];
@@ -463,7 +463,7 @@ export default function Home() {
   }
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
-    if (longPathCandidates && pathDecision === "ask") {
+    if (mode === "extract" && longPathCandidates && pathDecision === "ask") {
       setError("Choisissez d’abord comment traiter les chemins trop longs. Aucun nom ne sera raccourci sans votre autorisation.");
       return;
     }
@@ -500,7 +500,7 @@ export default function Home() {
       const u = selectedEntries;
       if (folder) {
         const root = selected || destination;
-        if (!root) { await chooseDestination(true); return; }
+        if (!root) { await chooseDestination(false); return; }
         const analysis = await analyzeDestination(root, u);
         setDestinationAnalysis(analysis);
         const structural = analysis.conflicts.filter((c) => c.kind === "file-vs-folder" || c.kind === "folder-vs-file");
@@ -752,25 +752,32 @@ export default function Home() {
                 />
                 Activer le classement intelligent
               </label>
-              <label className="optioncheck">
-                <input
-                  type="checkbox"
-                  checked={renameEnabled}
-                  onChange={(e) => setRenameEnabled(e.target.checked)}
-                />
-                Renommer les fichiers et les dossiers
-              </label>
-              <label>
-                Modèle
-                <input
-                  disabled={!renameEnabled}
-                  value={rename.pattern}
-                  onChange={(e) =>
-                    setRename({ ...rename, pattern: e.target.value })
-                  }
-                />
-                <small>{"{nom} {projet} {category} {date} {numero}"}</small>
-              </label>
+              {mode === "extract" && (
+                <>
+                  <label className="optioncheck">
+                    <input
+                      type="checkbox"
+                      checked={renameEnabled}
+                      onChange={(e) => setRenameEnabled(e.target.checked)}
+                    />
+                    Renommer les fichiers et les dossiers
+                  </label>
+                  <label>
+                    Modèle
+                    <input
+                      disabled={!renameEnabled}
+                      value={rename.pattern}
+                      onChange={(e) =>
+                        setRename({ ...rename, pattern: e.target.value })
+                      }
+                    />
+                    <small>{"{nom} {projet} {category} {date} {numero}"}</small>
+                  </label>
+                </>
+              )}
+              {mode === "create" && (
+                <small className="why">Les noms de fichiers et de dossiers restent identiques lors de la création d’une archive.</small>
+              )}
               <button className="enginebtn" onClick={() => setSettings(true)}>
                 <Settings2 />
                 Configurer les règles
@@ -780,21 +787,25 @@ export default function Home() {
               <h2>
                 <span>3</span>Destination
               </h2>
-              <label>
-                Nom
-                <input value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-              <div className="formatselect">
-                {["ZIP", "TAR", "TAR.GZ"].map((f) => (
-                  <button
-                    className={output === f ? "on" : ""}
-                    key={f}
-                    onClick={() => setOutput(f)}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
+              {mode === "create" && (
+                <>
+                  <label>
+                    Nom
+                    <input value={name} onChange={(e) => setName(e.target.value)} />
+                  </label>
+                  <div className="formatselect">
+                    {["ZIP", "TAR", "TAR.GZ"].map((f) => (
+                      <button
+                        className={output === f ? "on" : ""}
+                        key={f}
+                        onClick={() => setOutput(f)}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <div className="destinationchoice">
                 <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}><HardDrive />{destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}</button>
                 {destination && <button className="removedestination" title="Retirer le dossier choisi" onClick={() => { setDestination(null); setDestinationAnalysis(null); }}><XCircle /></button>}
@@ -872,13 +883,13 @@ export default function Home() {
             {archiveReports.length > 0 && (
               <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong></div>)}</div>
             )}
-            {longPathCandidates > 0 && pathDecision === "ask" && (
+            {mode === "extract" && longPathCandidates > 0 && pathDecision === "ask" && (
               <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne renomme jamais un fichier. Vous choisissez si les noms de dossiers peuvent être raccourcis.</small><span><button onClick={() => setPathDecision("shorten")}>Raccourcir les dossiers (fichiers inchangés)</button><button onClick={() => setPathDecision("preserve")}>Conserver tous les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
             )}
-            {longPathCandidates > 0 && pathDecision === "preserve" && (
+            {mode === "extract" && longPathCandidates > 0 && pathDecision === "preserve" && (
               <div className="pathwarning"><ShieldCheck /><div><b>Noms originaux conservés</b><small>Choisissez une destination courte, par exemple C:\\SIG, afin d’éviter l’erreur Windows.</small></div></div>
             )}
-            {longPathCandidates > 0 && pathDecision === "shorten" && (
+            {mode === "extract" && longPathCandidates > 0 && pathDecision === "shorten" && (
               <div className="pathwarning"><ShieldCheck /><div><b>Dossiers raccourcis, fichiers inchangés</b><small>Seuls les noms de dossiers sont raccourcis ; aucun fichier n’est renommé. Vérifiez les liens internes si un projet SIG est concerné.</small></div></div>
             )}
             {destination && planned.length > 0 && (
@@ -951,19 +962,21 @@ export default function Home() {
               <button
                 className="folderbtn"
                 disabled={!selectedCount || busy}
-                onClick={() => produce(true)}
+                onClick={() => (destination ? produce(true) : chooseDestination(false))}
               >
                 {destination ? "Enregistrer dans ce dossier" : "Choisir un dossier"}
               </button>
               {busy && progress && <button className="cancelbtn" onClick={() => abortRef.current?.abort()}><XCircle />Annuler</button>}
-              <button
-                className="downloadbtn"
-                disabled={!selectedCount || busy}
-                onClick={() => produce()}
-              >
-                <Download />
-                Télécharger
-              </button>
+              {mode === "create" && (
+                <button
+                  className="downloadbtn"
+                  disabled={!selectedCount || busy}
+                  onClick={() => produce()}
+                >
+                  <Download />
+                  Télécharger
+                </button>
+              )}
             </div>
           </section>
         </div>
