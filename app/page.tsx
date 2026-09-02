@@ -140,6 +140,8 @@ export default function Home() {
     [destinationAnalysis, setDestinationAnalysis] = useState<DestinationAnalysis | null>(null),
     [destinationBusy, setDestinationBusy] = useState(false),
     [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null),
+    [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
+    [nameWarning, setNameWarning] = useState(""),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState("name"),
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
@@ -239,7 +241,7 @@ export default function Home() {
     protectedFiles = planned.filter((e) => e.integrityProtected).length,
     unsafeProtectedPaths = planned.filter((e) => e.pathUnsafe).length,
     longPathCandidates = planned.filter((e) => e.needsPathDecision).length,
-    total = sources.reduce((s, f) => s + f.size, 0),
+    total = entries.reduce((s, e) => s + (e.directory ? 0 : e.size), 0),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
       for (const e of filtered) {
@@ -248,13 +250,26 @@ export default function Home() {
         m.set(f, [...(m.get(f) || []), e]);
       }
       return [...m];
-    }, [filtered]);
+    }, [filtered]),
+    sourceGroups = useMemo(() => {
+      const m = new Map<string, { count: number; size: number }>();
+      for (const e of entries) {
+        if (e.directory) continue;
+        const g = m.get(e.source) || { count: 0, size: 0 };
+        g.count += 1;
+        g.size += e.size;
+        m.set(e.source, g);
+      }
+      return [...m].map(([source, g]) => ({ source, ...g }));
+    }, [entries]);
   async function addFiles(l: FileList | null) {
     if (!l?.length) return;
     setBusy(true);
     setError("");
+    setNameWarning("");
     setLastReport(null);
     setPathDecision("ask");
+    setAnalyzeProgress({ done: 0, total: l.length });
     try {
       const fs = Array.from(l);
       setSources((p) => (mode === "create" ? [...p, ...fs] : fs));
@@ -275,42 +290,61 @@ export default function Home() {
           } catch (archiveError) {
             reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
           }
+          setAnalyzeProgress({ done: index + 1, total: fs.length });
         }
         setArchiveReports(reports);
         const failures = reports.filter((report) => report.status !== "ok");
         if (failures.length) setError(`${failures.length} archive(s) n’ont pas été entièrement analysées. Consultez le bilan par archive ci-dessous.`);
+        const duplicateBases = [...new Set(baseNames.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
+        if (duplicateBases.length) setNameWarning(`Attention : plusieurs archives sélectionnées portent le même nom (${duplicateBases.join(", ")}). Elles ont été numérotées automatiquement pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une erreur de sélection. Vous pouvez tout de même continuer.`);
       } else {
         setArchiveReports([]);
-        all = [
-          ...entries,
-          ...(await Promise.all(
-            fs.map(async (f) => ({
+        const existingNames = new Set(entries.filter((e) => !e.directory).map((e) => e.name.toLowerCase()));
+        const duplicateNames = [...new Set(fs.filter((f) => existingNames.has(f.name.toLowerCase())).map((f) => f.name))];
+        if (duplicateNames.length) setNameWarning(`Attention : ${duplicateNames.length > 1 ? "des fichiers portent des noms déjà ajoutés" : "un fichier porte un nom déjà ajouté"} (${duplicateNames.join(", ")}). Vérifiez qu’il ne s’agit pas d’une sélection en double. Vous pouvez tout de même continuer.`);
+        let done = 0;
+        const added = await Promise.all(
+          fs.map(async (f) => {
+            const entry = {
               name: f.name,
               size: f.size,
               data: new Uint8Array(await f.arrayBuffer()),
               date: new Date(f.lastModified),
               source: "Fichiers ajoutés",
-            })),
-          )),
-        ];
+            };
+            done += 1;
+            setAnalyzeProgress({ done, total: fs.length });
+            return entry;
+          }),
+        );
+        all = [...entries, ...added];
       }
       setEntries(await hashEntries(all));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analyse impossible");
     } finally {
       setBusy(false);
+      setAnalyzeProgress(null);
     }
   }
   async function processFolderArchives(items: FolderArchive[]) {
     const chosen = items.filter((item) => item.included);
     if (!chosen.length) { setError("Aucune archive sélectionnée dans ce dossier."); return; }
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNameWarning(""); setAnalyzeProgress({ done: 0, total: chosen.length });
     try {
       setSources(chosen.map((item) => item.file));
       setEntries([]);
+      const bases = chosen.map((item) => item.path.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "")), totals = new Map<string, number>();
+      bases.forEach((base) => totals.set(base.toLowerCase(), (totals.get(base.toLowerCase()) || 0) + 1));
+      const seen = new Map<string, number>(), roots: string[] = [];
+      for (const base of bases) {
+        const key = base.toLowerCase(), occurrence = (seen.get(key) || 0) + 1;
+        seen.set(key, occurrence);
+        roots.push((totals.get(key) || 0) > 1 ? `${base}__archive_${occurrence}` : base);
+      }
       const all: ArchiveEntry[] = [], reports: ArchiveReport[] = [];
       for (let index = 0; index < chosen.length; index += 1) {
-        const item = chosen[index], root = item.path.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "");
+        const item = chosen[index], root = roots[index];
         try {
           const extracted = await readArchive(item.file, security), identified = extracted.map((entry) => ({ ...entry, source: root }));
           all.push(...identified);
@@ -318,12 +352,15 @@ export default function Home() {
         } catch (archiveError) {
           reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
         }
+        setAnalyzeProgress({ done: index + 1, total: chosen.length });
       }
       setArchiveReports(reports);
       setEntries(await hashEntries(all));
       setFolderArchives([]);
+      const duplicateBases = [...new Set(bases.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
+      if (duplicateBases.length) setNameWarning(`Attention : plusieurs archives du dossier portent le même nom (${duplicateBases.join(", ")}). Elles ont été numérotées automatiquement pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une erreur de sélection. Vous pouvez tout de même continuer.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Analyse récursive impossible"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setAnalyzeProgress(null); }
   }
   async function addFolder(l: FileList | null) {
     if (!l?.length) return;
@@ -336,6 +373,7 @@ export default function Home() {
   function uniqueSourceName(base: string) {
     const used = new Set(entries.map((e) => e.source.toLowerCase()));
     if (!used.has(base.toLowerCase())) return base;
+    setNameWarning(`Attention : un dossier nommé « ${base} » a déjà été ajouté. Le nouveau a été numéroté pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une sélection en double. Vous pouvez tout de même continuer.`);
     for (let n = 2; ; n += 1) {
       const candidate = `${base} (${n})`;
       if (!used.has(candidate.toLowerCase())) return candidate;
@@ -343,25 +381,31 @@ export default function Home() {
   }
   async function addCreateFolder(l: FileList | null) {
     if (!l?.length) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNameWarning(""); setAnalyzeProgress({ done: 0, total: l.length });
     try {
       const files = Array.from(l), first = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath || files[0].name;
       const rootName = uniqueSourceName(first.split("/")[0]);
+      let done = 0;
       const imported = await Promise.all(files.map(async (file) => {
         const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
         const path = relative.split("/").slice(1).join("/");
-        return { name: path || file.name, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
+        const entry = { name: path || file.name, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
+        done += 1;
+        setAnalyzeProgress({ done, total: files.length });
+        return entry;
       }));
       setSources((p) => [...p, ...files]);
       setEntries(await hashEntries([...entries, ...imported]));
     } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setAnalyzeProgress(null); }
   }
   async function pickCompleteCreateFolder() {
     const picker = (window as any).showDirectoryPicker as undefined | (() => Promise<FileSystemDirectoryHandle>);
     if (!picker) { folderInput.current?.click(); return; }
     try {
-      const root = await picker(), rootName = uniqueSourceName(root.name), files: File[] = [], imported: ArchiveEntry[] = [];
+      const root = await picker();
+      setNameWarning("");
+      const rootName = uniqueSourceName(root.name), files: File[] = [], imported: ArchiveEntry[] = [];
       const walk = async (dir: FileSystemDirectoryHandle, parts: string[]) => {
         if (preserveEmpty && parts.length) imported.push({ name: parts.join("/"), size: 0, data: new Uint8Array(), source: rootName, directory: true, rootless: !preserveRoot });
         for await (const [itemName, handle] of (dir as any).entries()) {
@@ -369,20 +413,22 @@ export default function Home() {
           else {
             const file = await handle.getFile(); files.push(file);
             imported.push({ name: [...parts, itemName].join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot });
+            setAnalyzeProgress({ done: files.length, total: 0 });
           }
         }
       };
-      setBusy(true); setError(""); await walk(root, []);
+      setBusy(true); setError(""); setAnalyzeProgress({ done: 0, total: 0 }); await walk(root, []);
       setSources((p) => [...p, ...files]);
       setEntries(await hashEntries([...entries, ...imported]));
     } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setAnalyzeProgress(null); }
   }
   function reset(m?: Mode) {
     if (m) setMode(m);
     setSources([]);
     setEntries([]);
     setError("");
+    setNameWarning("");
     setDestinationAnalysis(null);
     setExcluded(new Set());
     setOverrides({});
@@ -390,6 +436,13 @@ export default function Home() {
     setLastReport(null);
     setArchiveReports([]);
     setPathDecision("ask");
+  }
+  function removeSource(source: string) {
+    setEntries((prev) => prev.filter((e) => e.source !== source));
+    setArchiveReports((prev) => prev.filter((r) => r.root !== source));
+    const prefix = `${source}\u0000`;
+    setExcluded((prev) => new Set([...prev].filter((key) => !key.startsWith(prefix))));
+    setOverrides((prev) => Object.fromEntries(Object.entries(prev).filter(([key]) => !key.startsWith(prefix))));
   }
 
   function applyBulk(kind: "category" | "folder" | "prefix") {
@@ -723,16 +776,31 @@ export default function Home() {
                   <footer><button onClick={() => setFolderArchives((current) => current.map((item) => ({ ...item, included: true })))}>Tout</button><button onClick={() => setFolderArchives([])}>Annuler</button><button onClick={() => processFolderArchives(folderArchives)}>Analyser la sélection</button></footer>
                 </div>
               )}
-              {sources.length > 0 && (
-                <div className="source-summary">
-                  <b>{sources.length}</b>
-                  <span>
-                    éléments<small>{formatBytes(total)}</small>
-                  </span>
-                  <button onClick={() => reset()}>
-                    <Trash2 />
-                  </button>
-                </div>
+              {sourceGroups.length > 0 && (
+                <>
+                  {sourceGroups.length > 1 && (
+                    <div className="source-summary">
+                      <b>{sourceGroups.length}</b>
+                      <span>
+                        éléments au total<small>{formatBytes(total)}</small>
+                      </span>
+                      <button title="Tout retirer" onClick={() => reset()}>
+                        <Trash2 />
+                      </button>
+                    </div>
+                  )}
+                  {sourceGroups.map((g) => (
+                    <div className="source-summary" key={g.source}>
+                      <b>{g.count}</b>
+                      <span>
+                        {g.source}<small>{formatBytes(g.size)}</small>
+                      </span>
+                      <button title="Retirer" onClick={() => removeSource(g.source)}>
+                        <Trash2 />
+                      </button>
+                    </div>
+                  ))}
+                </>
               )}
             </section>
             <section>
@@ -890,8 +958,18 @@ export default function Home() {
                 {error}
               </div>
             )}
+            {nameWarning && (
+              <div className="pathwarning">
+                <Info />
+                <div>
+                  <b>Doublon possible</b>
+                  <small>{nameWarning}</small>
+                </div>
+                <button title="Fermer" onClick={() => setNameWarning("")} style={{ marginLeft: "auto", border: 0, background: "none", color: "inherit", fontSize: 16, cursor: "pointer" }}>×</button>
+              </div>
+            )}
             {archiveReports.length > 0 && (
-              <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong></div>)}</div>
+              <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong><button title="Retirer cette archive" onClick={() => removeSource(report.root)}><Trash2 /></button></div>)}</div>
             )}
             {mode === "extract" && longPathCandidates > 0 && pathDecision === "ask" && (
               <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne renomme jamais un fichier. Vous choisissez si les noms de dossiers peuvent être raccourcis.</small><span><button onClick={() => setPathDecision("shorten")}>Raccourcir les dossiers (fichiers inchangés)</button><button onClick={() => setPathDecision("preserve")}>Conserver tous les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
@@ -924,6 +1002,12 @@ export default function Home() {
               <div className="v2empty">
                 <RefreshCcw className="spin" />
                 <b>Analyse en cours…</b>
+                {analyzeProgress && analyzeProgress.total > 0 && (
+                  <p>{Math.round((analyzeProgress.done / analyzeProgress.total) * 100)}% ({analyzeProgress.done}/{analyzeProgress.total})</p>
+                )}
+                {analyzeProgress && analyzeProgress.total === 0 && analyzeProgress.done > 0 && (
+                  <p>{analyzeProgress.done} fichier(s) analysé(s)</p>
+                )}
               </div>
             ) : !planned.length ? (
               <div className="v2empty">
