@@ -873,10 +873,13 @@ export default function Home() {
               <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong></div>)}</div>
             )}
             {longPathCandidates > 0 && pathDecision === "ask" && (
-              <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne modifiera aucun nom sans votre autorisation.</small><span><button onClick={() => setPathDecision("shorten")}>Autoriser le raccourcissement</button><button onClick={() => setPathDecision("preserve")}>Conserver les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
+              <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne renomme jamais un fichier. Vous choisissez si les noms de dossiers peuvent être raccourcis.</small><span><button onClick={() => setPathDecision("shorten")}>Raccourcir les dossiers (fichiers inchangés)</button><button onClick={() => setPathDecision("preserve")}>Conserver tous les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
             )}
             {longPathCandidates > 0 && pathDecision === "preserve" && (
               <div className="pathwarning"><ShieldCheck /><div><b>Noms originaux conservés</b><small>Choisissez une destination courte, par exemple C:\\SIG, afin d’éviter l’erreur Windows.</small></div></div>
+            )}
+            {longPathCandidates > 0 && pathDecision === "shorten" && (
+              <div className="pathwarning"><ShieldCheck /><div><b>Dossiers raccourcis, fichiers inchangés</b><small>Seuls les noms de dossiers sont raccourcis ; aucun fichier n’est renommé. Vérifiez les liens internes si un projet SIG est concerné.</small></div></div>
             )}
             {destination && planned.length > 0 && (
               <div className="destinationcheck">
@@ -1422,8 +1425,12 @@ function Row({ e, excluded, toggle }: { e: SmartEntry; excluded: boolean; toggle
       </div>
       {e.collision ? (
         <span className="dup">{c[e.collision]}</span>
+      ) : e.pathUnsafe ? (
+        <span className="integritybadge unsafe">Chemin long : destination courte</span>
+      ) : e.integrityProtected && e.pathAdjusted ? (
+        <span className="pathfixed" title={`Avant : ${e.originalPlanned}`}>Dossiers raccourcis (SIG)</span>
       ) : e.integrityProtected ? (
-        <span className={e.pathUnsafe ? "integritybadge unsafe" : "integritybadge"}>{e.pathUnsafe ? "Chemin long : destination courte" : "Liens SIG protégés"}</span>
+        <span className="integritybadge">Liens SIG protégés</span>
       ) : e.pathAdjusted ? (
         <span className="pathfixed" title={`Avant : ${e.originalPlanned}`}>Chemin Windows corrigé</span>
       ) : e.contentMatch ? (

@@ -319,36 +319,29 @@ function compactSegment(value: string, max: number) {
   const suffix = `~${compactHash(value)}`;
   return `${value.slice(0, Math.max(4, max - suffix.length))}${suffix}`;
 }
-function makeWindowsSafePath(path: string, limit: number, familyBases: Map<string, string>, preserveInternal = false) {
+// Shortens only the folder segments of a path so it fits under `limit`. The file
+// name (last segment) is never modified: renaming it would break references to
+// the file from outside ArchiveFlow (SIG project links, spreadsheets, scripts…).
+function makeWindowsSafePath(path: string, limit: number) {
   if (path.length <= limit && path.split("/").every((part) => part.length <= 90)) return path;
-  const originalParts = path.split("/"), parts = [...originalParts];
-  if (preserveInternal) {
-    parts[0] = compactSegment(parts[0], 36);
-    return parts.join("/");
-  }
-  for (let i = 0; i < parts.length - 1; i += 1) parts[i] = compactSegment(parts[i], 36);
-  const file = parts.at(-1) || "fichier", extension = ext(file), stem = extension ? file.slice(0, -extension.length - 1) : file;
-  const folderKey = originalParts.slice(0, -1).join("/").toLowerCase(), familyKey = `${folderKey}/${stem.toLowerCase()}`;
-  let safeStem = familyBases.get(familyKey);
-  if (!safeStem) {
-    safeStem = compactSegment(stem, 46);
-    familyBases.set(familyKey, safeStem);
-  }
-  parts[parts.length - 1] = extension ? `${safeStem}.${extension}` : safeStem;
+  const parts = path.split("/");
+  if (parts.length < 2) return path;
+  for (let i = 0; i < parts.length - 1; i += 1) if (parts[i].length > 36) parts[i] = compactSegment(parts[i], 36);
   if (parts.join("/").length > limit) {
-    for (let i = 1; i < parts.length - 1; i += 1) parts[i] = compactSegment(parts[i], 18);
+    for (let i = 0; i < parts.length - 1; i += 1) if (parts[i].length > 18) parts[i] = compactSegment(parts[i], 18);
   }
   if (parts.join("/").length > limit && parts.length > 3) {
-    const middle = originalParts.slice(1, -2).join("/");
-    parts.splice(1, parts.length - 3, `_chemin_${compactHash(middle)}`);
-  }
-  const current = parts.join("/"), overflow = current.length - limit;
-  if (overflow > 0) {
-    const last = parts.at(-1)!, lastExt = ext(last), lastStem = lastExt ? last.slice(0, -lastExt.length - 1) : last;
-    const finalStem = compactSegment(lastStem, Math.max(12, lastStem.length - overflow));
-    parts[parts.length - 1] = lastExt ? `${finalStem}.${lastExt}` : finalStem;
+    const middle = parts.slice(1, -2).join("/");
+    if (middle) parts.splice(1, parts.length - 3, `_chemin_${compactHash(middle)}`);
   }
   return parts.join("/");
+}
+function pathSuffix(integrityProtected: boolean, pathAdjusted: boolean) {
+  if (integrityProtected)
+    return pathAdjusted
+      ? " • dossiers raccourcis pour Windows, noms de fichiers conservés (vérifiez les liens du projet SIG)"
+      : " • noms de dossiers protégés pour conserver les liens du projet SIG";
+  return pathAdjusted ? " • dossiers raccourcis pour Windows" : "";
 }
 export function enrichEntries(
   entries: ArchiveEntry[],
@@ -366,7 +359,6 @@ export function enrichEntries(
     names = new Map<string, SmartEntry>(),
     familyMap = new Map<string, Set<string>>(),
     renamedFolders = new Map<string, string>(),
-    safeFamilyBases = new Map<string, string>(),
     renamedFamilyBases = new Map<string, string>(),
     protectedSources = new Set(entries.filter((entry) => ["qgs", "qgz"].includes(ext(entry.name))).map((entry) => entry.source));
   let folderCounter = 0;
@@ -457,9 +449,9 @@ export function enrichEntries(
       needsPathDecision = planned.length > pathLimit || planned.split("/").some((part) => part.length > 90),
       safePlanned = rename.windowsSafePaths === false
         ? planned
-        : makeWindowsSafePath(planned, pathLimit, safeFamilyBases, integrityProtected),
+        : makeWindowsSafePath(planned, pathLimit),
       pathAdjusted = safePlanned !== planned,
-      pathUnsafe = integrityProtected && (safePlanned.length > Math.max(100, rename.relativePathLimit || 180) || safePlanned.split("/").some((part) => part.length > 240));
+      pathUnsafe = rename.windowsSafePaths !== false && (safePlanned.length > pathLimit || safePlanned.split("/").some((part) => part.length > 240));
     let collision: SmartEntry["collision"],
       contentMatch = false;
     const sameName = names.get(safePlanned.toLowerCase()),
@@ -484,7 +476,7 @@ export function enrichEntries(
             : `${safePlanned}${tag}`;
       }
       if (rename.windowsSafePaths !== false)
-        final = makeWindowsSafePath(final, Math.max(100, rename.relativePathLimit || 180), safeFamilyBases, integrityProtected);
+        final = makeWindowsSafePath(final, pathLimit);
     }
     if (included) {
       const originalFinal = final;
@@ -508,8 +500,8 @@ export function enrichEntries(
       pathUnsafe,
       needsPathDecision,
       explanation: rule
-        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`
-        : `Arborescence originale conservée dans « ${sourceRoot} »${integrityProtected ? " • noms protégés pour conserver les liens du projet SIG" : pathAdjusted ? " • chemin raccourci pour Windows" : ""}`,
+        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${pathSuffix(integrityProtected, pathAdjusted)}`
+        : `Arborescence originale conservée dans « ${sourceRoot} »${pathSuffix(integrityProtected, pathAdjusted)}`,
     };
     names.set(final.toLowerCase(), out);
     if (e.hash) hashes.set(e.hash, out);
