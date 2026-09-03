@@ -93,6 +93,27 @@ export function estimateProcessing(entries: { size: number; name: string; direct
   const estimatedSeconds = totalBytes / (50 * 1024 * 1024);
   return { totalBytes, estimatedOutputBytes, estimatedSeconds };
 }
+// Greedy bucketing for "split into archives of at most N Mo" - this produces
+// several independent, self-contained archives (archive_part1.zip, _part2, ...),
+// not an official spanned/multi-volume format (.z01+.zip, .partN.rar): each
+// part opens on its own with any standard tool. A single file bigger than the
+// limit gets its own bucket anyway, since a file can't be split mid-content.
+export function bucketBySize<T extends { size: number }>(files: T[], maxBytes: number): T[][] {
+  if (maxBytes <= 0) return files.length ? [files] : [];
+  const buckets: T[][] = [];
+  let current: T[] = [], currentBytes = 0;
+  for (const file of files) {
+    if (current.length && currentBytes + file.size > maxBytes) {
+      buckets.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(file);
+    currentBytes += file.size;
+  }
+  if (current.length) buckets.push(current);
+  return buckets;
+}
 export function formatDuration(seconds: number) {
   if (seconds < 1) return "< 1 s";
   if (seconds < 60) return `${Math.ceil(seconds)} s`;

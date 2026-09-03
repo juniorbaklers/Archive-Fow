@@ -25,6 +25,7 @@ import {
   DEFAULT_SECURITY_LIMITS,
   SecurityLimits,
   ZipCompression,
+  bucketBySize,
   estimateProcessing,
   formatBytes,
   formatDuration,
@@ -131,6 +132,7 @@ export default function Home() {
     [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
     [nameWarning, setNameWarning] = useState(""),
     [theme, setTheme] = useState<"light" | "dark">("light"),
+    [maxArchiveSizeMb, setMaxArchiveSizeMb] = useState(""),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState("name"),
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
@@ -602,34 +604,35 @@ export default function Home() {
         if (result.skipped) setError(`${result.skipped} élément(s) n’ont pas été écrits en raison de la politique choisie ou d’un conflit de destination. Consultez la simulation avant de recommencer.`);
         hist("Organisation", "Dossier");
       } else {
-        let d: Uint8Array, n: string, m: string;
-        if (output === "GZIP") {
-          if (outputFiles.length !== 1) {
-            setError("GZIP ne peut compresser qu’un seul fichier à la fois. Choisissez TAR.GZ pour plusieurs fichiers.");
-            return;
+        async function buildArchive(archiveEntries: ArchiveEntry[], archiveFiles: ArchiveEntry[], baseName: string) {
+          if (output === "GZIP") {
+            if (archiveFiles.length !== 1) throw Error("GZIP ne peut compresser qu’un seul fichier à la fois. Choisissez TAR.GZ pour plusieurs fichiers.");
+            return { data: await makeGzip(archiveFiles[0]), filename: `${baseName}.gz`, mime: "application/gzip" };
           }
-          d = await makeGzip(outputFiles[0]);
-          n = `${name}.gz`;
-          m = "application/gzip";
-        } else if (output === "TAR") {
-          d = makeTar(u);
-          n = `${name}.tar`;
-          m = "application/x-tar";
-        } else if (output === "TAR.GZ") {
-          d = await makeTarGz(u);
-          n = `${name}.tar.gz`;
-          m = "application/gzip";
-        } else {
-          d = await makeZip(u, zipCompression);
-          n = `${name}.zip`;
-          m = "application/zip";
+          if (output === "TAR") return { data: makeTar(archiveEntries), filename: `${baseName}.tar`, mime: "application/x-tar" };
+          if (output === "TAR.GZ") return { data: await makeTarGz(archiveEntries), filename: `${baseName}.tar.gz`, mime: "application/gzip" };
+          return { data: await makeZip(archiveEntries, zipCompression), filename: `${baseName}.zip`, mime: "application/zip" };
         }
-        const expectedBytes = outputFiles.reduce((sum, e) => sum + e.size, 0);
-        const verified = await verifyProduced(d, n, m, outputFiles.length, expectedBytes);
-        if (!verified) throw Error("Contrôle d’intégrité échoué après la création : le contenu relu ne correspond pas à la sélection. Aucun fichier n’a été proposé au téléchargement.");
-        dl(d, n, m);
-        setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: outputFiles.length, skipped: 0, complete: true });
-        hist(mode === "extract" ? "Extraction" : "Création", output);
+        const maxBytes = output !== "GZIP" ? Number(maxArchiveSizeMb) * 1024 * 1024 : 0;
+        const buckets = maxBytes > 0 ? bucketBySize(outputFiles, maxBytes) : [outputFiles];
+        const multi = buckets.length > 1;
+        if (multi) {
+          const oversized = buckets.filter((bucket) => bucket.length === 1 && bucket[0].size > maxBytes).length;
+          if (oversized) setError(`${oversized} fichier(s) dépassent à eux seuls la taille maximale par archive ; ils ont chacun été placés dans leur propre archive, un peu plus grande que la limite demandée (un fichier ne peut pas être coupé).`);
+        }
+        const directoryEntries = selectedEntries.filter((e) => e.directory);
+        let saved = 0;
+        for (let i = 0; i < buckets.length; i++) {
+          const bucketFiles = buckets[i], baseName = multi ? `${name}_part${i + 1}` : name;
+          const built = await buildArchive(multi ? [...directoryEntries, ...bucketFiles] : u, bucketFiles, baseName);
+          const expectedBytes = bucketFiles.reduce((sum, e) => sum + e.size, 0);
+          const verified = await verifyProduced(built.data, built.filename, built.mime, bucketFiles.length, expectedBytes);
+          if (!verified) throw Error(`Contrôle d’intégrité échoué après la création de ${built.filename} : le contenu relu ne correspond pas à la sélection. Aucun fichier n’a été proposé au téléchargement.`);
+          dl(built.data, built.filename, built.mime);
+          saved += bucketFiles.length;
+        }
+        setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved, skipped: 0, complete: true });
+        hist(mode === "extract" ? "Extraction" : "Création", multi ? `${output} (${buckets.length} archives)` : output);
       }
       localStorage.setItem(
         "archiveflow-journal",
@@ -899,6 +902,23 @@ export default function Home() {
                       />
                       Compresser le ZIP (plus lent, fichier plus petit)
                     </label>
+                  )}
+                  <label>
+                    Taille maximale par archive <small>(Mo, facultatif)</small>
+                    <input
+                      type="number"
+                      min="1"
+                      inputMode="numeric"
+                      placeholder="Illimitée"
+                      value={maxArchiveSizeMb}
+                      disabled={output === "GZIP"}
+                      onChange={(e) => setMaxArchiveSizeMb(e.target.value)}
+                    />
+                  </label>
+                  {Number(maxArchiveSizeMb) > 0 && (
+                    <small className="why">
+                      Le découpage se base sur la taille d’origine des fichiers (avant compression) : chaque archive produite restera à la taille indiquée ou en dessous. Au-delà de cette taille, le téléchargement produira plusieurs archives complètes et indépendantes (« {name}_part1 », « {name}_part2 », …) — pas un format de volumes multi-parties officiel (.z01, .part1.rar).
+                    </small>
                   )}
                 </>
               )}
