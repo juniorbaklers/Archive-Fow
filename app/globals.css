@@ -99,6 +99,76 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
+/* Dark theme: overrides the base scale tokens only. Every rule in this file
+   reads colors through the ink, brand, white and role-alias variables, so
+   redefining these leaf tokens here is enough to re-theme the whole app -
+   nothing below this block needs a second, duplicate dark ruleset. */
+.v2[data-theme="dark"] {
+  --ink-900: #f1f5f9;
+  --ink-800: #e2e8f0;
+  --ink-700: #cbd5e1;
+  --ink-600: #94a3b8;
+  --ink-500: #94a3b8;
+  --ink-400: #6b7896;
+  --ink-300: #3c4a63;
+  --ink-200: #2a3752;
+  --ink-100: #1b2438;
+  --ink-50: #0b1220;
+  --white: #131b2c;
+  --surface-sunken: #101827;
+
+  --brand-50: #1c2244;
+  --brand-100: #262f5c;
+  --brand-200: #33407a;
+  --brand-400: #93a1fb;
+  --brand-600: #818cf8;
+  --brand-700: #a5b0fb;
+
+  --success-50: #0d2a22;
+  --warning-50: #332107;
+  --danger-50: #3a1414;
+  --amber-50: #332107;
+  --success-600: #10b981;
+  --warning-600: #f59e0b;
+  --danger-600: #ef4444;
+  --success-700: #34d399;
+  --warning-700: #fbbf24;
+  --danger-700: #f87171;
+  --amber-700: #fbbf24;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.6);
+
+  /* Chromium doesn't reliably invalidate a role-alias custom property (e.g.
+     --bg) across rules when only the leaf token it points to (e.g. --ink-50)
+     changes via this attribute selector - redeclaring the aliases here,
+     in the same rule as their leaf tokens, forces correct re-resolution. */
+  --bg: var(--ink-50);
+  --surface: var(--white);
+  --surface-alt: var(--ink-100);
+  --border: var(--ink-200);
+  --border-strong: var(--ink-300);
+  --text: var(--ink-900);
+  --text-muted: var(--ink-500);
+  --text-subtle: var(--ink-400);
+  --primary: var(--brand-600);
+  --primary-hover: var(--brand-700);
+  --primary-soft: var(--brand-50);
+  --primary-soft-strong: var(--brand-100);
+  --success: var(--success-600);
+  --success-soft: var(--success-50);
+  --warning: var(--warning-600);
+  --warning-soft: var(--warning-50);
+  --danger: var(--danger-600);
+  --danger-soft: var(--danger-50);
+}
+.v2[data-theme="dark"] .v2bar { background: #070c16; }
+.v2[data-theme="dark"] .search,
+.v2[data-theme="dark"] .destinationbtn,
+.v2[data-theme="dark"] .folderimport > button { background: var(--surface-sunken); }
+
 /* ==========================================================================
    ArchiveFlow workspace
    ========================================================================== */
@@ -146,8 +216,12 @@
 .v2bar nav button svg { width: 15px; }
 .v2bar nav button:hover { color: var(--ink-200); }
 .v2bar nav button.on { border-color: var(--brand-400); color: var(--white); }
-.v2bar > strong { display: flex; align-items: center; gap: 7px; color: #6ee7b7; font-size: var(--fs-xs); font-weight: 700; }
-.v2bar > strong svg { width: 15px; }
+.v2barright { display: flex; align-items: center; gap: 14px; }
+.v2barright > strong { display: flex; align-items: center; gap: 7px; color: #6ee7b7; font-size: var(--fs-xs); font-weight: 700; }
+.v2barright > strong svg { width: 15px; }
+.themetoggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid #263349; border-radius: var(--r-full); background: none; color: var(--ink-300); }
+.themetoggle:hover { color: var(--white); border-color: var(--ink-400); }
+.themetoggle svg { width: 15px; }
 
 /* -- Workspace header ------------------------------------------------------ */
 .v2wrap { max-width: 1320px; margin: auto; padding: 36px 24px; }
@@ -473,6 +547,8 @@
 .destinationcheck > div { display: flex; flex-direction: column; }
 .destinationcheck b { font-size: var(--fs-xs); }
 .destinationcheck small { color: #4d7b69; font-size: var(--fs-2xs); }
+.destinationcheck.low { border-color: #f0d59a; background: var(--warning-soft); color: var(--warning-700); }
+.destinationcheck.low small { color: var(--warning-700); }
 .cancelbtn { border: 1px solid #f0b8bd !important; background: var(--danger-soft) !important; color: var(--danger-700) !important; }
 .selectionbar {
   display: flex; align-items: center; gap: 7px; margin: 10px 22px 0; padding: 8px 10px;
@@ -625,6 +701,9 @@
 .historypanel article span { display: flex; flex-direction: column; min-width: 0; }
 .historypanel article b { font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nohistory { padding: 55px 0; text-align: center; color: var(--text-subtle); font-size: var(--fs-sm); }
+.historyexport { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+.historyexport button { padding: 9px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-700); font-size: var(--fs-xs); font-weight: 700; }
+.historyexport button:hover { border-color: var(--primary); color: var(--primary); }
 .clearhistory {
   width: 100%; margin-top: 22px; padding: 11px; border: 1px solid #f0c8c8; border-radius: var(--r-sm);
   background: var(--danger-soft); color: var(--danger-700); font-size: var(--fs-sm); font-weight: 700;

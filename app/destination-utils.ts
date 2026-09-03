@@ -3,7 +3,26 @@ import { CollisionPolicy } from "./smart-engine";
 
 export type DestinationConflictKind = "file-vs-folder" | "folder-vs-file" | "same-path-same-content" | "same-path-different-content" | "same-content-other-path";
 export type DestinationConflict = { entryPath: string; existingPath: string; kind: DestinationConflictKind };
-export type DestinationAnalysis = { conflicts: DestinationConflict[]; requiredBytes: number; scannedFiles: number; spaceStatus: "unknown" };
+export type SpaceStatus =
+  | { kind: "unknown" }
+  | { kind: "ok"; availableBytes: number }
+  | { kind: "low"; availableBytes: number };
+export type DestinationAnalysis = { conflicts: DestinationConflict[]; requiredBytes: number; scannedFiles: number; spaceStatus: SpaceStatus };
+
+// The browser only exposes a per-origin storage quota, not real free disk
+// space - it's usually a fraction of what's actually free, and unrelated
+// browsers/profiles have their own separate quotas. Treated as an estimate,
+// never as a guarantee.
+async function estimateSpace(requiredBytes: number): Promise<SpaceStatus> {
+  try {
+    const estimate = await navigator.storage?.estimate?.();
+    if (!estimate || estimate.quota === undefined || estimate.usage === undefined) return { kind: "unknown" };
+    const availableBytes = Math.max(0, estimate.quota - estimate.usage);
+    return { kind: availableBytes < requiredBytes * 1.1 ? "low" : "ok", availableBytes };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
 
 const clean = (value: string) => value.replace(/\\/g, "/").split("/").filter((part) => part && part !== "." && part !== "..");
 async function digest(data: BufferSource) {
@@ -55,7 +74,8 @@ export async function analyzeDestination(root: FileSystemDirectoryHandle, entrie
       if (other) conflicts.push({ entryPath: parts.join("/"), existingPath: other, kind: "same-content-other-path" });
     }
   }
-  return { conflicts, requiredBytes: entries.reduce((sum, entry) => sum + entry.size, 0), scannedFiles: existing.length, spaceStatus: "unknown" };
+  const requiredBytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+  return { conflicts, requiredBytes, scannedFiles: existing.length, spaceStatus: await estimateSpace(requiredBytes) };
 }
 async function uniqueFileName(dir: FileSystemDirectoryHandle, name: string) {
   const dot = name.lastIndexOf("."), stem = dot > 0 ? name.slice(0, dot) : name, extension = dot > 0 ? name.slice(dot) : "";

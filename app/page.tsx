@@ -91,6 +91,11 @@ function dl(data: Uint8Array, name: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(u), 1000);
 }
+function spaceStatusText(status: DestinationAnalysis["spaceStatus"]) {
+  if (status.kind === "unknown") return "espace de stockage non estimable par ce navigateur";
+  const label = `${formatBytes(status.availableBytes)} de stockage estimé disponible`;
+  return status.kind === "low" ? `${label} — proche de la limite, libérez de l’espace` : label;
+}
 export default function Home() {
   const [mode, setMode] = useState<Mode>("extract"),
     [entries, setEntries] = useState<ArchiveEntry[]>([]),
@@ -123,6 +128,7 @@ export default function Home() {
     [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null),
     [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
     [nameWarning, setNameWarning] = useState(""),
+    [theme, setTheme] = useState<"light" | "dark">("light"),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState("name"),
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
@@ -164,6 +170,9 @@ export default function Home() {
         setProfile(c.profile || "custom");
         setPreserveAll(c.preserveAll !== false);
       }
+      const storedTheme = localStorage.getItem("archiveflow-theme");
+      if (storedTheme === "dark" || storedTheme === "light") setTheme(storedTheme);
+      else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) setTheme("dark");
     } catch {}
   }, []);
   useEffect(
@@ -183,6 +192,9 @@ export default function Home() {
       ),
     [rules, cats, rename, policy, classify, renameEnabled, profile, preserveAll],
   );
+  useEffect(() => {
+    try { localStorage.setItem("archiveflow-theme", theme); } catch {}
+  }, [theme]);
   const effectivePolicy: CollisionPolicy = preserveAll && policy === "skip" ? "keep-both" : policy;
   const basePlanned = useMemo(
       () =>
@@ -664,8 +676,13 @@ export default function Home() {
     }
   }
   return (
-    <main className="v2">
-      <TopBar onOpenHistory={() => setHistoryOpen(true)} onOpenSettings={() => setSettings(true)} />
+    <main className="v2" data-theme={theme}>
+      <TopBar
+        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenSettings={() => setSettings(true)}
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+      />
       <section className="v2wrap">
         <div className="v2title">
           <div>
@@ -975,11 +992,15 @@ export default function Home() {
               <div className="pathwarning"><ShieldCheck /><div><b>Dossiers raccourcis, fichiers inchangés</b><small>Seuls les noms de dossiers sont raccourcis ; aucun fichier n’est renommé. Vérifiez les liens internes si un projet SIG est concerné.</small></div></div>
             )}
             {destination && planned.length > 0 && (
-              <div className="destinationcheck">
+              <div className={destinationAnalysis?.spaceStatus.kind === "low" ? "destinationcheck low" : "destinationcheck"}>
                 <HardDrive />
                 <div>
                   <b>{destinationBusy ? "Analyse de la destination…" : `Destination vérifiée : ${destination.name}`}</b>
-                  <small>{destinationAnalysis ? `${destinationAnalysis.conflicts.length} signalement(s) • ${formatBytes(destinationAnalysis.requiredBytes)} requis • espace libre non accessible par le navigateur` : "L’analyse sera effectuée avant toute écriture."}</small>
+                  <small>
+                    {destinationAnalysis
+                      ? `${destinationAnalysis.conflicts.length} signalement(s) • ${formatBytes(destinationAnalysis.requiredBytes)} requis • ${spaceStatusText(destinationAnalysis.spaceStatus)}`
+                      : "L’analyse sera effectuée avant toute écriture."}
+                  </small>
                 </div>
               </div>
             )}

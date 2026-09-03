@@ -1,6 +1,16 @@
-import { Archive, History, Settings2, ShieldCheck } from "lucide-react";
+import { Archive, History, Moon, Settings2, ShieldCheck, Sun } from "lucide-react";
 
-export function TopBar({ onOpenHistory, onOpenSettings }: { onOpenHistory: () => void; onOpenSettings: () => void }) {
+export function TopBar({
+  onOpenHistory,
+  onOpenSettings,
+  theme,
+  onToggleTheme,
+}: {
+  onOpenHistory: () => void;
+  onOpenSettings: () => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+}) {
   return (
     <header className="v2bar">
       <a className="v2brand">
@@ -23,10 +33,15 @@ export function TopBar({ onOpenHistory, onOpenSettings }: { onOpenHistory: () =>
           Paramètres
         </button>
       </nav>
-      <strong>
-        <ShieldCheck />
-        Traitement local
-      </strong>
+      <div className="v2barright">
+        <button className="themetoggle" onClick={onToggleTheme} title={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}>
+          {theme === "dark" ? <Sun /> : <Moon />}
+        </button>
+        <strong>
+          <ShieldCheck />
+          Traitement local
+        </strong>
+      </div>
     </header>
   );
 }
