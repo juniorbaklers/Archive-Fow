@@ -120,6 +120,91 @@ export function formatDuration(seconds: number) {
   if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
   return `${(seconds / 3600).toFixed(1)} h`;
 }
+
+export type MultiPartGroup =
+  | { kind: "concat"; baseName: string; files: File[] }
+  | { kind: "unsupported"; reason: string; files: File[] };
+// Detects multi-part archive sets among a flat file selection:
+// - "name.<ext>.001", "name.<ext>.002", ... : a plain sequential concatenation,
+//   reconstructed here by byte-concatenation into one virtual File.
+// - "name.z01", "name.z02", ... (+ "name.zip"): an official spanned-ZIP set.
+// - "name.part1.rar", "name.part2.rar", ... : an official RAR multi-volume set.
+// The spanned-ZIP and RAR-multi-volume formats need real container-aware
+// reconstruction, not just concatenation - flagged as unsupported here rather
+// than silently producing a corrupt result.
+export function detectMultiPart(files: File[]): { groups: MultiPartGroup[]; rest: File[] } {
+  const lower = (s: string) => s.toLowerCase();
+  const used = new Set<number>();
+  const groups: MultiPartGroup[] = [];
+
+  const rarGroups = new Map<string, number[]>();
+  files.forEach((f, i) => {
+    const m = f.name.match(/^(.*)\.part\d+\.rar$/i);
+    if (m) rarGroups.set(lower(m[1]), [...(rarGroups.get(lower(m[1])) || []), i]);
+  });
+  for (const idxs of rarGroups.values()) {
+    if (idxs.length < 2) continue;
+    groups.push({ kind: "unsupported", reason: "Volumes RAR multi-parties (.partN.rar) : reconstituez l’archive avec WinRAR ou 7-Zip avant de l’importer ici.", files: idxs.map((i) => files[i]) });
+    idxs.forEach((i) => used.add(i));
+  }
+
+  const zGroups = new Map<string, number[]>();
+  files.forEach((f, i) => {
+    if (used.has(i)) return;
+    const m = f.name.match(/^(.*)\.z\d{2,3}$/i);
+    if (m) zGroups.set(lower(m[1]), [...(zGroups.get(lower(m[1])) || []), i]);
+  });
+  for (const [base, idxs] of zGroups) {
+    const zipIndex = files.findIndex((f, i) => !used.has(i) && lower(f.name) === `${base}.zip`);
+    const all = zipIndex >= 0 ? [...idxs, zipIndex] : idxs;
+    groups.push({ kind: "unsupported", reason: "Volumes ZIP fractionnés (.zNN + .zip) : reconstituez l’archive avec 7-Zip ou WinRAR avant de l’importer ici.", files: all.map((i) => files[i]) });
+    all.forEach((i) => used.add(i));
+  }
+
+  const concatGroups = new Map<string, { num: number; index: number }[]>();
+  files.forEach((f, i) => {
+    if (used.has(i)) return;
+    const m = f.name.match(/^(.*)\.(\d{3})$/);
+    if (m) concatGroups.set(lower(m[1]), [...(concatGroups.get(lower(m[1])) || []), { num: Number(m[2]), index: i }]);
+  });
+  for (const parts of concatGroups.values()) {
+    if (parts.length < 2) continue;
+    const sorted = [...parts].sort((a, b) => a.num - b.num);
+    if (!sorted.every((p, i) => p.num === i + 1)) continue;
+    groups.push({ kind: "concat", baseName: files[sorted[0].index].name.replace(/\.\d{3}$/, ""), files: sorted.map((p) => files[p.index]) });
+    sorted.forEach((p) => used.add(p.index));
+  }
+
+  return { groups, rest: files.filter((_, i) => !used.has(i)) };
+}
+
+const NESTED_ARCHIVE_RE = /\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i;
+// Recursively opens archives found inside an already-read archive (a .zip
+// containing another .zip, etc), merging their contents in under a folder
+// named after the nested archive. Bounded by `depth` so a chain of nested
+// archives can't be used to balloon memory use - each nested read still goes
+// through the same security limits as a top-level archive.
+export async function extractNestedArchives(list: ArchiveEntry[], limits: SecurityLimits, depth = 3): Promise<ArchiveEntry[]> {
+  if (depth <= 0) return list;
+  const out: ArchiveEntry[] = [];
+  for (const entry of list) {
+    if (!entry.directory && entry.data.length > 0 && NESTED_ARCHIVE_RE.test(entry.name)) {
+      try {
+        const nestedFile = new File([entry.data as BlobPart], entry.name);
+        const nested = await readArchive(nestedFile, limits);
+        const folder = entry.name.replace(NESTED_ARCHIVE_RE, "");
+        const prefixed = nested.map((n) => ({ ...n, name: `${folder}/${n.name}`, source: entry.source }));
+        out.push(...(await extractNestedArchives(prefixed, limits, depth - 1)));
+        continue;
+      } catch {
+        // Not actually a readable archive (password-protected, corrupt, or a
+        // false-positive extension match) - keep the original file as-is.
+      }
+    }
+    out.push(entry);
+  }
+  return out;
+}
 export function detectFormat(f: File) {
   const n = f.name.toLowerCase();
   if (n.endsWith(".tar.gz") || n.endsWith(".tgz")) return "TAR.GZ";

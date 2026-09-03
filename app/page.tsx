@@ -26,7 +26,9 @@ import {
   SecurityLimits,
   ZipCompression,
   bucketBySize,
+  detectMultiPart,
   estimateProcessing,
+  extractNestedArchives,
   formatBytes,
   formatDuration,
   hashEntries,
@@ -148,6 +150,7 @@ export default function Home() {
     [bulkPrefix, setBulkPrefix] = useState(""),
     [folderMode, setFolderMode] = useState<"auto" | "choose">("choose"),
     [includeHidden, setIncludeHidden] = useState(false),
+    [extractNested, setExtractNested] = useState(false),
     [folderArchives, setFolderArchives] = useState<FolderArchive[]>([]),
     [preserveRoot, setPreserveRoot] = useState(true),
     [preserveEmpty, setPreserveEmpty] = useState(true),
@@ -282,19 +285,29 @@ export default function Home() {
     setPathDecision("ask");
     setAnalyzeProgress({ done: 0, total: l.length });
     try {
-      const fs = Array.from(l);
+      const rawFiles = Array.from(l);
       let all: ArchiveEntry[] = [];
       if (mode === "extract") {
         setEntries([]);
+        const { groups, rest } = detectMultiPart(rawFiles);
+        const unsupportedReports: ArchiveReport[] = groups
+          .filter((g) => g.kind === "unsupported")
+          .map((g, i) => ({ id: `multipart-${i}`, name: g.files.map((f) => f.name).join(", "), root: g.files[0].name, count: 0, status: "error" as const, message: g.reason }));
+        const reconstructed = groups
+          .filter((g): g is Extract<typeof g, { kind: "concat" }> => g.kind === "concat")
+          .map((g) => new File(g.files, g.baseName));
+        const fs = [...rest, ...reconstructed];
         const baseNames = fs.map((file) => file.name.replace(/\.(tar\.gz|tgz|zip|tar|gz|gzip|7z|rar)$/i, "") || "Archive"), totals = new Map<string, number>();
         baseNames.forEach((base) => totals.set(base.toLowerCase(), (totals.get(base.toLowerCase()) || 0) + 1));
-        const seen = new Map<string, number>(), reports: ArchiveReport[] = [];
+        const seen = new Map<string, number>(), reports: ArchiveReport[] = [...unsupportedReports];
         for (let index = 0; index < fs.length; index += 1) {
           const f = fs[index], base = baseNames[index], key = base.toLowerCase(), occurrence = (seen.get(key) || 0) + 1;
           seen.set(key, occurrence);
           const root = (totals.get(key) || 0) > 1 ? `${base}__archive_${occurrence}` : base;
           try {
-            const extracted = await readArchive(f, security), identified = extracted.map((entry) => ({ ...entry, source: root }));
+            const extracted = await readArchive(f, security);
+            let identified = extracted.map((entry) => ({ ...entry, source: root }));
+            if (extractNested) identified = await extractNestedArchives(identified, security);
             all.push(...identified);
             reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : "Aucun fichier trouvé" });
           } catch (archiveError) {
@@ -310,11 +323,11 @@ export default function Home() {
       } else {
         setArchiveReports([]);
         const existingNames = new Set(entries.filter((e) => !e.directory).map((e) => e.name.toLowerCase()));
-        const duplicateNames = [...new Set(fs.filter((f) => existingNames.has(f.name.toLowerCase())).map((f) => f.name))];
+        const duplicateNames = [...new Set(rawFiles.filter((f) => existingNames.has(f.name.toLowerCase())).map((f) => f.name))];
         if (duplicateNames.length) setNameWarning(`Attention : ${duplicateNames.length > 1 ? "des fichiers portent des noms déjà ajoutés" : "un fichier porte un nom déjà ajouté"} (${duplicateNames.join(", ")}). Vérifiez qu’il ne s’agit pas d’une sélection en double. Vous pouvez tout de même continuer.`);
         let done = 0;
         const added = await Promise.all(
-          fs.map(async (f) => {
+          rawFiles.map(async (f) => {
             const entry = {
               name: f.name,
               size: f.size,
@@ -323,7 +336,7 @@ export default function Home() {
               source: "Fichiers ajoutés",
             };
             done += 1;
-            setAnalyzeProgress({ done, total: fs.length });
+            setAnalyzeProgress({ done, total: rawFiles.length });
             return entry;
           }),
         );
@@ -355,7 +368,9 @@ export default function Home() {
       for (let index = 0; index < chosen.length; index += 1) {
         const item = chosen[index], root = roots[index];
         try {
-          const extracted = await readArchive(item.file, security), identified = extracted.map((entry) => ({ ...entry, source: root }));
+          const extracted = await readArchive(item.file, security);
+          let identified = extracted.map((entry) => ({ ...entry, source: root }));
+          if (extractNested) identified = await extractNestedArchives(identified, security);
           all.push(...identified);
           reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: identified.length, status: identified.length ? "ok" : "empty" });
         } catch (archiveError) {
@@ -768,6 +783,7 @@ export default function Home() {
                   <label><input type="radio" checked={folderMode === "choose"} onChange={() => setFolderMode("choose")} /> Choisir les archives avant analyse</label>
                   <label><input type="radio" checked={folderMode === "auto"} onChange={() => setFolderMode("auto")} /> Analyser automatiquement</label>
                   <label title="Recommandé pour éviter les fichiers inutiles et sensibles"><input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} /> Inclure les dossiers cachés et système</label>
+                  <label title="Ouvre les archives trouvées à l’intérieur d’autres archives, jusqu’à 3 niveaux de profondeur"><input type="checkbox" checked={extractNested} onChange={(e) => setExtractNested(e.target.checked)} /> Extraire aussi les archives imbriquées</label>
                 </div>
               )}
               {mode === "create" && (
