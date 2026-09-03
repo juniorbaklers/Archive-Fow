@@ -57,6 +57,48 @@ export function formatBytes(n: number) {
   if (n < 1073741824) return `${(n / 1048576).toFixed(1)} Mo`;
   return `${(n / 1073741824).toFixed(1)} Go`;
 }
+// Rough compression ratios by extension, used only for the pre-processing
+// estimate shown to the user - never for the actual archive (which is built
+// from the real bytes). Already-compressed formats barely shrink further;
+// plain text/markup compresses well; anything unlisted gets a middle guess.
+const COMPRESSIBILITY: Record<string, number> = {
+  zip: 0.98, rar: 0.98, "7z": 0.98, gz: 0.98, tgz: 0.98, xz: 0.98, bz2: 0.98, "7zip": 0.98,
+  jpg: 0.99, jpeg: 0.99, png: 0.98, gif: 0.98, webp: 0.99, avif: 0.99, heic: 0.99,
+  mp3: 0.99, aac: 0.99, ogg: 0.99, flac: 0.97,
+  mp4: 0.99, mov: 0.99, avi: 0.97, mkv: 0.99, webm: 0.99,
+  pdf: 0.92,
+  docx: 0.9, xlsx: 0.9, pptx: 0.9, odt: 0.9, ods: 0.9,
+  doc: 0.6, xls: 0.6, ppt: 0.6,
+  txt: 0.35, csv: 0.3, tsv: 0.3, json: 0.25, xml: 0.3, log: 0.3,
+  html: 0.35, css: 0.35, js: 0.4, ts: 0.4, jsx: 0.4, tsx: 0.4, md: 0.4, sql: 0.3, yml: 0.3, yaml: 0.3,
+};
+const DEFAULT_COMPRESSIBILITY_RATIO = 0.7;
+export type ProcessingEstimate = { totalBytes: number; estimatedOutputBytes: number; estimatedSeconds: number };
+// Purely a heuristic to help the user gauge scale before launching a large
+// job - never treated as exact, and never used to decide whether to proceed.
+export function estimateProcessing(entries: { size: number; name: string; directory?: boolean }[], compress: boolean): ProcessingEstimate {
+  const files = entries.filter((e) => !e.directory);
+  const totalBytes = files.reduce((sum, e) => sum + e.size, 0);
+  const estimatedOutputBytes = !compress
+    ? totalBytes
+    : Math.round(
+        files.reduce((sum, e) => {
+          const ext = e.name.toLowerCase().split(".").pop() || "";
+          return sum + e.size * (COMPRESSIBILITY[ext] ?? DEFAULT_COMPRESSIBILITY_RATIO);
+        }, 0),
+      );
+  // ~50 Mo/s is a conservative order-of-magnitude figure for in-browser
+  // hashing + reading + compressing on typical hardware; real throughput
+  // varies a lot by device, so this is only ever shown as an estimate.
+  const estimatedSeconds = totalBytes / (50 * 1024 * 1024);
+  return { totalBytes, estimatedOutputBytes, estimatedSeconds };
+}
+export function formatDuration(seconds: number) {
+  if (seconds < 1) return "< 1 s";
+  if (seconds < 60) return `${Math.ceil(seconds)} s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+  return `${(seconds / 3600).toFixed(1)} h`;
+}
 export function detectFormat(f: File) {
   const n = f.name.toLowerCase();
   if (n.endsWith(".tar.gz") || n.endsWith(".tgz")) return "TAR.GZ";

@@ -549,6 +549,14 @@
 .destinationcheck small { color: #4d7b69; font-size: var(--fs-2xs); }
 .destinationcheck.low { border-color: #f0d59a; background: var(--warning-soft); color: var(--warning-700); }
 .destinationcheck.low small { color: var(--warning-700); }
+.estimatebox {
+  display: flex; align-items: center; gap: 10px; margin: 10px 22px 0; padding: 10px 12px;
+  border: 1px solid var(--primary-soft-strong); border-radius: var(--r-sm); background: var(--primary-soft); color: var(--primary);
+}
+.estimatebox > svg { width: 18px; flex: 0 0 auto; }
+.estimatebox > div { display: flex; flex-direction: column; }
+.estimatebox b { font-size: var(--fs-xs); }
+.estimatebox small { color: var(--text-muted); font-size: var(--fs-2xs); line-height: 1.5; }
 .cancelbtn { border: 1px solid #f0b8bd !important; background: var(--danger-soft) !important; color: var(--danger-700) !important; }
 .selectionbar {
   display: flex; align-items: center; gap: 7px; margin: 10px 22px 0; padding: 8px 10px;

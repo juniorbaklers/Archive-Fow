@@ -25,7 +25,9 @@ import {
   DEFAULT_SECURITY_LIMITS,
   SecurityLimits,
   ZipCompression,
+  estimateProcessing,
   formatBytes,
+  formatDuration,
   hashEntries,
   makeGzip,
   makeTar,
@@ -235,8 +237,13 @@ export default function Home() {
     unsafeProtectedPaths = planned.filter((e) => e.pathUnsafe).length,
     longPathCandidates = planned.filter((e) => e.needsPathDecision).length,
     quarantinedCount = planned.filter((e) => e.quarantined).length,
-    selectableFileCount = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)) && !e.directory).length,
+    selectedFiles = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)) && !e.directory),
+    selectableFileCount = selectedFiles.length,
     total = entries.reduce((s, e) => s + (e.directory ? 0 : e.size), 0),
+    estimate = useMemo(
+      () => estimateProcessing(selectedFiles, mode === "create" && (output === "ZIP" ? zipCompression === "deflate" : output !== "TAR")),
+      [selectedFiles, mode, output, zipCompression],
+    ),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
       for (const e of filtered) {
@@ -894,6 +901,21 @@ export default function Home() {
                     </label>
                   )}
                 </>
+              )}
+              {selectableFileCount > 0 && (
+                <div className="estimatebox">
+                  <Layers3 />
+                  <div>
+                    <b>Estimation avant traitement</b>
+                    <small>
+                      {formatBytes(estimate.totalBytes)} à traiter
+                      {mode === "create" && estimate.estimatedOutputBytes !== estimate.totalBytes
+                        ? ` • environ ${formatBytes(estimate.estimatedOutputBytes)} une fois compressé`
+                        : ""}
+                      {" "}• environ {formatDuration(estimate.estimatedSeconds)} estimée(s) — dépend de votre appareil
+                    </small>
+                  </div>
+                </div>
               )}
               <div className="destinationchoice">
                 <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}><HardDrive />{destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}</button>
