@@ -9,7 +9,10 @@ export type ArchiveEntry = {
   planned?: string;
   directory?: boolean;
   rootless?: boolean;
+  quarantined?: boolean;
+  quarantineReason?: string;
 };
+export type ZipCompression = "store" | "deflate";
 export type SecurityLimits = {
   maxExpandedBytes: number;
   maxFiles: number;
@@ -70,7 +73,7 @@ async function decompress(data: Uint8Array, format: "deflate-raw" | "gzip") {
     .pipeThrough(new DecompressionStream(format));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-async function compress(data: Uint8Array, format: "gzip") {
+async function compress(data: Uint8Array, format: "gzip" | "deflate-raw") {
   const stream = new Blob([data as BlobPart])
     .stream()
     .pipeThrough(new CompressionStream(format));
@@ -108,20 +111,36 @@ export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECUR
       unixType = (external >>> 16) & 0xf000,
       isDirectory =
         name.endsWith("/") || (external & 0x10) !== 0 || unixType === 0x4000;
-    expandedTotal += size;
-    compressedTotal += cs;
-    checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits);
-    const entryRatio = cs > 0 ? size / cs : size > 0 ? Infinity : 0;
-    if (entryRatio > limits.maxRatio) securityError(`« ${name} » atteint un ratio ${Math.round(entryRatio)}:1 supérieur à ${limits.maxRatio}:1`);
+    const entryRatio = cs > 0 ? size / cs : size > 0 ? Infinity : 0,
+      suspicious = !isDirectory && entryRatio > limits.maxRatio;
+    // A suspicious entry is quarantined instead of decompressed, so its claimed
+    // size never counts against the aggregate limits below - it isn't actually
+    // materialized in memory, so it can't contribute to a real bomb.
+    if (!suspicious) {
+      expandedTotal += size;
+      compressedTotal += cs;
+      checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits);
+    }
     if (!isDirectory) {
-      if (method !== 0 && method !== 8)
-        throw Error(`Compression ZIP non prise en charge : ${name}`);
-      out.push({
-        name,
-        size,
-        data: method === 0 ? packed : await decompress(packed, "deflate-raw"),
-        source: file.name,
-      });
+      if (suspicious) {
+        out.push({
+          name,
+          size,
+          data: new Uint8Array(),
+          source: file.name,
+          quarantined: true,
+          quarantineReason: `ratio de compression ${Math.round(entryRatio)}:1 supérieur à ${limits.maxRatio}:1`,
+        });
+      } else {
+        if (method !== 0 && method !== 8)
+          throw Error(`Compression ZIP non prise en charge : ${name}`);
+        out.push({
+          name,
+          size,
+          data: method === 0 ? packed : await decompress(packed, "deflate-raw"),
+          source: file.name,
+        });
+      }
     }
     cur += 46 + nl + el + cl;
   }
@@ -235,7 +254,7 @@ function joinBytes(chunks: Uint8Array[], size: number) {
   }
   return out;
 }
-export function makeZip(entries: ArchiveEntry[]) {
+export async function makeZip(entries: ArchiveEntry[], compression: ZipCompression = "store") {
   const enc = new TextEncoder(),
     local: Uint8Array[] = [],
     central: Uint8Array[] = [];
@@ -246,29 +265,32 @@ export function makeZip(entries: ArchiveEntry[]) {
       cleanName = safe(f.planned || f.name) + (f.directory ? "/" : ""),
       name = enc.encode(cleanName),
       crc = crc32(data),
+      shouldCompress = compression === "deflate" && !f.directory && data.length > 0,
+      packed = shouldCompress ? await compress(data, "deflate-raw") : data,
+      method = shouldCompress ? 8 : 0,
       localHeader = new Uint8Array(30),
       lv = new DataView(localHeader.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
     lv.setUint16(6, 0x800, true);
-    lv.setUint16(8, 0, true);
+    lv.setUint16(8, method, true);
     lv.setUint32(14, crc, true);
-    lv.setUint32(18, data.length, true);
+    lv.setUint32(18, packed.length, true);
     lv.setUint32(22, data.length, true);
     lv.setUint16(26, name.length, true);
     lv.setUint16(28, 0, true);
     const entryOffset = localSize;
-    local.push(localHeader, name, data);
-    localSize += localHeader.length + name.length + data.length;
+    local.push(localHeader, name, packed);
+    localSize += localHeader.length + name.length + packed.length;
     const centralHeader = new Uint8Array(46),
       cv = new DataView(centralHeader.buffer);
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
     cv.setUint16(8, 0x800, true);
-    cv.setUint16(10, 0, true);
+    cv.setUint16(10, method, true);
     cv.setUint32(16, crc, true);
-    cv.setUint32(20, data.length, true);
+    cv.setUint32(20, packed.length, true);
     cv.setUint32(24, data.length, true);
     cv.setUint16(28, name.length, true);
     if (f.directory) cv.setUint32(38, 0x10, true);
@@ -334,6 +356,9 @@ export function makeTar(entries: ArchiveEntry[]) {
 }
 export async function makeTarGz(entries: ArchiveEntry[]) {
   return compress(makeTar(entries), "gzip");
+}
+export async function makeGzip(entry: ArchiveEntry) {
+  return compress(entry.data, "gzip");
 }
 export async function hashEntries(entries: ArchiveEntry[]) {
   const seen = new Map<string, number>();

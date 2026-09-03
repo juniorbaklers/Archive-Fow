@@ -10,10 +10,10 @@ type FormatSupport = {
 };
 
 const FORMAT_MATRIX: FormatSupport[] = [
-  { format: "ZIP", extensions: ".zip", read: "Complet", create: "Complet", encrypted: "Non", note: "Extraction, arborescence, dossiers vides et création disponibles." },
+  { format: "ZIP", extensions: ".zip", read: "Complet", create: "Complet", encrypted: "Non", note: "Extraction, arborescence, dossiers vides, création avec compression optionnelle et intégrité vérifiée après création." },
   { format: "TAR", extensions: ".tar", read: "Complet", create: "Complet", encrypted: "Non", note: "Format non compressé, adapté aux lots et aux arborescences." },
   { format: "TAR.GZ", extensions: ".tar.gz, .tgz", read: "Complet", create: "Complet", encrypted: "Non", note: "Archive TAR compressée en GZIP, extraction et création disponibles." },
-  { format: "GZIP", extensions: ".gz, .gzip", read: "Complet", create: "Partiel", encrypted: "Non", note: "Un flux ou fichier unique ; pour plusieurs fichiers, utiliser TAR.GZ." },
+  { format: "GZIP", extensions: ".gz, .gzip", read: "Complet", create: "Partiel", encrypted: "Non", note: "Un seul fichier à la fois ; pour plusieurs fichiers, utiliser TAR.GZ." },
   { format: "7Z", extensions: ".7z", read: "Complet", create: "Non", encrypted: "Selon archive", note: "Extraction locale ; les archives protégées peuvent demander un mot de passe." },
   { format: "RAR", extensions: ".rar", read: "Complet", create: "Non", encrypted: "Selon archive", note: "Extraction locale uniquement ; création RAR non disponible dans le navigateur." },
 ];

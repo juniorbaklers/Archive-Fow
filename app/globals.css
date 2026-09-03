@@ -232,7 +232,8 @@
 }
 .controls label > input:not([type="checkbox"]):focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft-strong); }
 .controls label > small { display: block; margin-top: 5px; line-height: 1.5; font-weight: 500; color: var(--text-subtle); }
-.formatselect { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 13px; }
+.formatselect { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 13px; }
+.formatselect button:disabled { opacity: 0.4; cursor: not-allowed; }
 .formatselect button {
   padding: 9px 4px; border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--surface); color: var(--text-muted); font-size: var(--fs-2xs); font-weight: 800;
@@ -274,6 +275,9 @@
   border-radius: var(--r-sm); background: var(--danger-soft); color: var(--danger-700); font-size: var(--fs-sm); font-weight: 600;
 }
 .v2error svg { width: 16px; flex: 0 0 auto; }
+.v2error > div { display: flex; flex-direction: column; }
+.v2error b { font-size: var(--fs-sm); }
+.v2error small { font-size: var(--fs-xs); line-height: 1.5; font-weight: 500; }
 .tree { height: 392px; overflow: auto; padding: 14px 22px; }
 .treegroup { margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
 .treegroup h3 { display: flex; align-items: center; gap: 7px; margin: 0; padding: 10px 12px; background: var(--surface-alt); font-size: var(--fs-xs); font-weight: 700; color: var(--ink-700); }

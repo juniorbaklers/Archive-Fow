@@ -24,8 +24,10 @@ import {
   ArchiveEntry,
   DEFAULT_SECURITY_LIMITS,
   SecurityLimits,
+  ZipCompression,
   formatBytes,
   hashEntries,
+  makeGzip,
   makeTar,
   makeTarGz,
   makeZip,
@@ -70,14 +72,14 @@ type SaveReport = { detected: number; selected: number; saved: number; skipped: 
 type ArchiveReport = { id: string; name: string; root: string; count: number; status: "ok" | "empty" | "error"; message?: string };
 type PathDecision = "ask" | "shorten" | "preserve";
 type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
-const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string }[] = [
+const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string; policy?: CollisionPolicy; security?: Partial<SecurityLimits> }[] = [
   { id: "custom", name: "Personnalisé", description: "Vos catégories et règles actuelles" },
-  { id: "sig", name: "SIG", category: "SIG", folder: "SIG", description: "Shapefiles, GeoJSON, GPKG, QGIS et données géographiques" },
-  { id: "documents", name: "Documents", category: "Bureautique", folder: "Documents", description: "Documents, PDF, tableurs et présentations" },
-  { id: "media", name: "Médias", category: "Audio et vidéo", folder: "Médias", description: "Images, audio, vidéo et fichiers associés" },
-  { id: "developer", name: "Développeur", category: "Développement", folder: "Code", description: "Code source, configurations et documentation" },
-  { id: "cad", name: "CAO / BIM", category: "CAO, BIM et scientifique", folder: "CAO-BIM", description: "Plans, modèles, maquettes et ressources techniques" },
-  { id: "science", name: "Scientifique", category: "Données", folder: "Données-scientifiques", description: "Jeux de données, bases, mesures et résultats" },
+  { id: "sig", name: "SIG", category: "SIG", folder: "SIG", description: "Shapefiles, GeoJSON, GPKG, QGIS et données géographiques", policy: "keep-both", security: { maxDepth: 30 } },
+  { id: "documents", name: "Documents", category: "Bureautique", folder: "Documents", description: "Documents, PDF, tableurs et présentations", policy: "keep-both" },
+  { id: "media", name: "Médias", category: "Audio et vidéo", folder: "Médias", description: "Images, audio, vidéo et fichiers associés", policy: "keep-both", security: { maxFiles: 100000, maxExpandedBytes: 30 * 1024 ** 3 } },
+  { id: "developer", name: "Développeur", category: "Développement", folder: "Code", description: "Code source, configurations et documentation", policy: "keep-both", security: { maxFiles: 100000 } },
+  { id: "cad", name: "CAO / BIM", category: "CAO, BIM et scientifique", folder: "CAO-BIM", description: "Plans, modèles, maquettes et ressources techniques", policy: "keep-both", security: { maxExpandedBytes: 50 * 1024 ** 3 } },
+  { id: "science", name: "Scientifique", category: "Données", folder: "Données-scientifiques", description: "Jeux de données, bases, mesures et résultats", policy: "keep-both", security: { maxFiles: 200000, maxExpandedBytes: 50 * 1024 ** 3 } },
 ];
 const archivePattern = /\.(zip|tar|tar\.gz|tgz|gz|gzip|7z|rar)$/i;
 const hiddenOrSystem = (path: string) => path.split("/").some((part) => part.startsWith(".") || ["__MACOSX", "node_modules", "$RECYCLE.BIN", "System Volume Information"].includes(part));
@@ -93,6 +95,7 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("extract"),
     [entries, setEntries] = useState<ArchiveEntry[]>([]),
     [output, setOutput] = useState("ZIP"),
+    [zipCompression, setZipCompression] = useState<ZipCompression>("deflate"),
     [name, setName] = useState("archive-organisee"),
     [view, setView] = useState<"tree" | "list">("tree"),
     [busy, setBusy] = useState(false),
@@ -219,6 +222,8 @@ export default function Home() {
     protectedFiles = planned.filter((e) => e.integrityProtected).length,
     unsafeProtectedPaths = planned.filter((e) => e.pathUnsafe).length,
     longPathCandidates = planned.filter((e) => e.needsPathDecision).length,
+    quarantinedCount = planned.filter((e) => e.quarantined).length,
+    selectableFileCount = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)) && !e.directory).length,
     total = entries.reduce((s, e) => s + (e.directory ? 0 : e.size), 0),
     tree = useMemo(() => {
       const m = new Map<string, SmartEntry[]>();
@@ -240,6 +245,13 @@ export default function Home() {
       }
       return [...m].map(([source, g]) => ({ source, ...g }));
     }, [entries]);
+  async function loadEntries(list: ArchiveEntry[]) {
+    const hashed = await hashEntries(list);
+    setEntries(hashed);
+    const quarantinedKeys = hashed.filter((e) => e.quarantined).map(entryKey);
+    if (quarantinedKeys.length) setExcluded((prev) => new Set([...prev, ...quarantinedKeys]));
+    return hashed;
+  }
   async function addFiles(l: FileList | null) {
     if (!l?.length) return;
     setBusy(true);
@@ -296,7 +308,7 @@ export default function Home() {
         );
         all = [...entries, ...added];
       }
-      setEntries(await hashEntries(all));
+      await loadEntries(all);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analyse impossible");
     } finally {
@@ -331,7 +343,7 @@ export default function Home() {
         setAnalyzeProgress({ done: index + 1, total: chosen.length });
       }
       setArchiveReports(reports);
-      setEntries(await hashEntries(all));
+      await loadEntries(all);
       setFolderArchives([]);
       const duplicateBases = [...new Set(bases.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
       if (duplicateBases.length) setNameWarning(`Attention : plusieurs archives du dossier portent le même nom (${duplicateBases.join(", ")}). Elles ont été numérotées automatiquement pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une erreur de sélection. Vous pouvez tout de même continuer.`);
@@ -370,7 +382,7 @@ export default function Home() {
         setAnalyzeProgress({ done, total: files.length });
         return entry;
       }));
-      setEntries(await hashEntries([...entries, ...imported]));
+      await loadEntries([...entries, ...imported]);
     } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
@@ -393,7 +405,7 @@ export default function Home() {
         }
       };
       setBusy(true); setError(""); setAnalyzeProgress({ done: 0, total: 0 }); await walk(root, []);
-      setEntries(await hashEntries([...entries, ...imported]));
+      await loadEntries([...entries, ...imported]);
     } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
@@ -440,6 +452,8 @@ export default function Home() {
       { id: `profile-${id}-other`, priority: 99, enabled: true, field: "name", operator: "contains", value: "", destination: `{projet}/Autres/{category}` },
     ]);
     setRename((current) => ({ ...current, project: selected.name }));
+    if (selected.policy) setPolicy(selected.policy);
+    if (selected.security) setSecurity((current) => ({ ...current, ...selected.security }));
   }
 
   function setAllSelection(action: "all" | "none" | "invert") {
@@ -496,6 +510,15 @@ export default function Home() {
     ].slice(0, 25);
     setHistory(n);
     localStorage.setItem("archiveflow-history", JSON.stringify(n));
+  }
+  async function verifyProduced(data: Uint8Array, filename: string, mime: string, expectedCount: number, expectedBytes: number) {
+    try {
+      const reread = await readArchive(new File([data as BlobPart], filename, { type: mime }), security);
+      const actualBytes = reread.reduce((sum, e) => sum + e.size, 0);
+      return reread.length === expectedCount && actualBytes === expectedBytes;
+    } catch {
+      return false;
+    }
   }
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
@@ -561,7 +584,15 @@ export default function Home() {
         hist("Organisation", "Dossier");
       } else {
         let d: Uint8Array, n: string, m: string;
-        if (output === "TAR") {
+        if (output === "GZIP") {
+          if (outputFiles.length !== 1) {
+            setError("GZIP ne peut compresser qu’un seul fichier à la fois. Choisissez TAR.GZ pour plusieurs fichiers.");
+            return;
+          }
+          d = await makeGzip(outputFiles[0]);
+          n = `${name}.gz`;
+          m = "application/gzip";
+        } else if (output === "TAR") {
           d = makeTar(u);
           n = `${name}.tar`;
           m = "application/x-tar";
@@ -570,10 +601,13 @@ export default function Home() {
           n = `${name}.tar.gz`;
           m = "application/gzip";
         } else {
-          d = makeZip(u);
+          d = await makeZip(u, zipCompression);
           n = `${name}.zip`;
           m = "application/zip";
         }
+        const expectedBytes = outputFiles.reduce((sum, e) => sum + e.size, 0);
+        const verified = await verifyProduced(d, n, m, outputFiles.length, expectedBytes);
+        if (!verified) throw Error("Contrôle d’intégrité échoué après la création : le contenu relu ne correspond pas à la sélection. Aucun fichier n’a été proposé au téléchargement.");
         dl(d, n, m);
         setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: outputFiles.length, skipped: 0, complete: true });
         hist(mode === "extract" ? "Extraction" : "Création", output);
@@ -769,7 +803,7 @@ export default function Home() {
                 </select>
                 <small>{PROFILES.find((item) => item.id === profile)?.description}</small>
               </label>
-              {profile !== "custom" && <div className="profileactive"><ShieldCheck /><span><b>Profil {PROFILES.find((item) => item.id === profile)?.name} actif</b><small>Règles appliquées automatiquement et modifiables.</small></span></div>}
+              {profile !== "custom" && <div className="profileactive"><ShieldCheck /><span><b>Profil {PROFILES.find((item) => item.id === profile)?.name} actif</b><small>Règles, politique de doublons et seuils de sécurité appliqués automatiquement — modifiables dans Paramètres.</small></span></div>}
               <label className="optioncheck">
                 <input
                   type="checkbox"
@@ -820,16 +854,28 @@ export default function Home() {
                     <input value={name} onChange={(e) => setName(e.target.value)} />
                   </label>
                   <div className="formatselect">
-                    {["ZIP", "TAR", "TAR.GZ"].map((f) => (
+                    {["ZIP", "TAR", "TAR.GZ", "GZIP"].map((f) => (
                       <button
                         className={output === f ? "on" : ""}
                         key={f}
+                        disabled={f === "GZIP" && selectableFileCount !== 1}
+                        title={f === "GZIP" && selectableFileCount !== 1 ? "GZIP ne compresse qu’un seul fichier à la fois" : undefined}
                         onClick={() => setOutput(f)}
                       >
                         {f}
                       </button>
                     ))}
                   </div>
+                  {output === "ZIP" && (
+                    <label className="optioncheck">
+                      <input
+                        type="checkbox"
+                        checked={zipCompression === "deflate"}
+                        onChange={(e) => setZipCompression(e.target.checked ? "deflate" : "store")}
+                      />
+                      Compresser le ZIP (plus lent, fichier plus petit)
+                    </label>
+                  )}
                 </>
               )}
               <div className="destinationchoice">
@@ -942,6 +988,9 @@ export default function Home() {
             )}
             {protectedFiles > 0 && (
               <div className="integritynotice"><ShieldCheck /><div><b>Projet SIG protégé : {protectedFiles} élément(s)</b><small>Les noms internes sont conservés pour ne pas casser les liens des couches QGIS/ArcGIS.{unsafeProtectedPaths ? ` ${unsafeProtectedPaths} chemin(s) reste(nt) long(s) : choisissez un dossier de destination proche de la racine, par exemple C:\\SIG.` : ""}</small></div></div>
+            )}
+            {quarantinedCount > 0 && (
+              <div className="v2error"><Info /><div><b>{quarantinedCount} élément(s) mis en quarantaine</b><small> — ratio de compression anormal (signature de bombe zip). Ils sont exclus par défaut ; ouvrez la fiche de chaque fichier pour les inclure quand même si vous êtes certain de leur origine.</small></div></div>
             )}
             {lastReport && (
               <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? "Enregistrement complet" : "Enregistrement incomplet"}</b><small>{lastReport.detected} détecté(s) • {lastReport.selected} sélectionné(s) • {lastReport.saved} enregistré(s) • {lastReport.skipped} non enregistré(s)</small></div></div>

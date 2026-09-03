@@ -12,7 +12,7 @@ export function EntryRow({ e, excluded, toggle }: { e: SmartEntry; excluded: boo
   return (
     <div
       className={`v2row ${e.collision ? "duplicate" : ""} ${excluded ? "excluded" : ""}`}
-      title={e.explanation}
+      title={e.quarantined ? `Mis en quarantaine : ${e.quarantineReason}` : e.explanation}
     >
       <input type="checkbox" checked={!excluded} onChange={toggle} aria-label={`Inclure ${(e.planned || e.name).split("/").pop()}`} />
       <i>{e.directory ? <FolderOpen /> : <File />}</i>
@@ -21,7 +21,11 @@ export function EntryRow({ e, excluded, toggle }: { e: SmartEntry; excluded: boo
         <small>
           {e.category} • {formatBytes(e.size)} • {e.source}
         </small>
-        <small className="why">{e.explanation}</small>
+        {e.quarantined ? (
+          <small className="familywarn">Quarantaine : {e.quarantineReason}</small>
+        ) : (
+          <small className="why">{e.explanation}</small>
+        )}
         {e.family && (
           <small className={e.familyIncomplete ? "familywarn" : "familyok"}>
             {e.family} —{" "}
@@ -29,7 +33,9 @@ export function EntryRow({ e, excluded, toggle }: { e: SmartEntry; excluded: boo
           </small>
         )}
       </div>
-      {e.collision ? (
+      {e.quarantined ? (
+        <span className="integritybadge unsafe">Quarantaine</span>
+      ) : e.collision ? (
         <span className="dup">{COLLISION_LABEL[e.collision]}</span>
       ) : e.pathUnsafe ? (
         <span className="integritybadge unsafe">Chemin long : destination courte</span>
