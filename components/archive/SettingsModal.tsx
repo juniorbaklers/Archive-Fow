@@ -8,6 +8,7 @@ import {
   RenameOptions,
   SmartRule,
 } from "@/app/smart-engine";
+import { TranslationKey } from "@/app/i18n";
 
 export type SettingsTab = "rules" | "rename" | "duplicates" | "security" | "categories";
 
@@ -30,34 +31,36 @@ export type SettingsModalProps = {
   jsonInput: RefObject<HTMLInputElement | null>;
   security: SecurityLimits;
   setSecurity: (security: SecurityLimits) => void;
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
 };
 
-const RENAME_FIELDS: [keyof RenameOptions, string][] = [
-  ["project", "Projet"],
-  ["pattern", "Modèle"],
-  ["prefix", "Préfixe"],
-  ["suffix", "Suffixe"],
-  ["search", "Rechercher"],
-  ["replace", "Remplacer"],
+const RENAME_FIELD_KEYS: [keyof RenameOptions, TranslationKey][] = [
+  ["project", "settings.rename.project"],
+  ["pattern", "settings.rename.pattern"],
+  ["prefix", "settings.rename.prefix"],
+  ["suffix", "settings.rename.suffix"],
+  ["search", "settings.rename.search"],
+  ["replace", "settings.rename.replace"],
 ];
 
-const POLICIES: [CollisionPolicy, string][] = [
-  ["keep-both", "Conserver les deux"],
-  ["rename", "Renommer automatiquement"],
-  ["skip", "Ignorer"],
-  ["duplicates-folder", "Déplacer dans Doublons"],
-  ["replace-confirm", "Remplacer après confirmation"],
+const POLICY_KEYS: [CollisionPolicy, TranslationKey][] = [
+  ["keep-both", "settings.duplicates.keepBoth"],
+  ["rename", "settings.duplicates.renameAuto"],
+  ["skip", "settings.duplicates.skip"],
+  ["duplicates-folder", "settings.duplicates.moveToDuplicates"],
+  ["replace-confirm", "settings.duplicates.replaceConfirm"],
 ];
 
-const TABS: [SettingsTab, string][] = [
-  ["rules", "Règles"],
-  ["rename", "Renommage"],
-  ["duplicates", "Doublons"],
-  ["security", "Sécurité"],
-  ["categories", "Catégories"],
+const TAB_KEYS: [SettingsTab, TranslationKey][] = [
+  ["rules", "settings.tab.rules"],
+  ["rename", "settings.tab.rename"],
+  ["duplicates", "settings.tab.duplicates"],
+  ["security", "settings.tab.security"],
+  ["categories", "settings.tab.categories"],
 ];
 
 export function SettingsModal(p: SettingsModalProps) {
+  const { t } = p;
   const upd = (id: string, x: Partial<SmartRule>) =>
     p.setRules(p.rules.map((r) => (r.id === id ? { ...r, ...x } : r)));
 
@@ -66,19 +69,19 @@ export function SettingsModal(p: SettingsModalProps) {
       <div className="settingspanel" onClick={(e) => e.stopPropagation()}>
         <header>
           <div>
-            <h2>Moteur de classement intelligent</h2>
-            <p>Configuration locale et partageable.</p>
+            <h2>{t("settings.title")}</h2>
+            <p>{t("settings.subtitle")}</p>
           </div>
           <button onClick={p.close}>×</button>
         </header>
         <nav>
-          {TABS.map(([id, label]) => (
+          {TAB_KEYS.map(([id, labelKey]) => (
             <button
               key={id}
               className={p.tab === id ? "on" : ""}
               onClick={() => p.setTab(id)}
             >
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </nav>
@@ -101,9 +104,9 @@ export function SettingsModal(p: SettingsModalProps) {
                   ])
                 }
               >
-                + Règle
+                {t("settings.addRule")}
               </button>
-              <button onClick={p.exportJson}>Exporter JSON</button>
+              <button onClick={p.exportJson}>{t("settings.exportJson")}</button>
               <input
                 hidden
                 ref={p.jsonInput}
@@ -112,7 +115,7 @@ export function SettingsModal(p: SettingsModalProps) {
                 onChange={(e) => p.importJson(e.target.files?.[0])}
               />
               <button onClick={() => p.jsonInput.current?.click()}>
-                Importer
+                {t("settings.import")}
               </button>
               <button
                 onClick={() =>
@@ -130,7 +133,7 @@ export function SettingsModal(p: SettingsModalProps) {
                   )
                 }
               >
-                Partager
+                {t("settings.share")}
               </button>
             </div>
             {p.rules.map((r, i) => (
@@ -169,7 +172,7 @@ export function SettingsModal(p: SettingsModalProps) {
                 </select>
                 <input
                   value={r.value}
-                  placeholder="Valeur"
+                  placeholder={t("settings.valuePlaceholder")}
                   onChange={(e) => upd(r.id, { value: e.target.value })}
                 />
                 <input
@@ -203,9 +206,9 @@ export function SettingsModal(p: SettingsModalProps) {
         )}
         {p.tab === "rename" && (
           <section className="formgrid">
-            {RENAME_FIELDS.map(([k, l]) => (
+            {RENAME_FIELD_KEYS.map(([k, labelKey]) => (
               <label key={k}>
-                {l}
+                {t(labelKey)}
                 <input
                   value={String(p.rename[k])}
                   onChange={(e) =>
@@ -215,33 +218,33 @@ export function SettingsModal(p: SettingsModalProps) {
               </label>
             ))}
             <label>
-              Casse
+              {t("settings.rename.case")}
               <select
                 value={p.rename.caseMode}
                 onChange={(e) =>
                   p.setRename({ ...p.rename, caseMode: e.target.value as RenameOptions["caseMode"] })
                 }
               >
-                <option value="none">Conserver</option>
-                <option value="upper">MAJUSCULES</option>
-                <option value="lower">minuscules</option>
+                <option value="none">{t("settings.rename.caseKeep")}</option>
+                <option value="upper">{t("settings.rename.caseUpper")}</option>
+                <option value="lower">{t("settings.rename.caseLower")}</option>
               </select>
             </label>
             <label>
-              Espaces
+              {t("settings.rename.spaces")}
               <select
                 value={p.rename.spaces}
                 onChange={(e) =>
                   p.setRename({ ...p.rename, spaces: e.target.value as RenameOptions["spaces"] })
                 }
               >
-                <option value="keep">Conserver</option>
+                <option value="keep">{t("settings.rename.spacesKeep")}</option>
                 <option value="underscore">_</option>
                 <option value="dash">-</option>
               </select>
             </label>
             <label>
-              Longueur max
+              {t("settings.rename.maxLength")}
               <input
                 type="number"
                 value={p.rename.maxLength}
@@ -258,7 +261,7 @@ export function SettingsModal(p: SettingsModalProps) {
                   p.setRename({ ...p.rename, removeAccents: e.target.checked })
                 }
               />
-              Sans accents
+              {t("settings.rename.noAccents")}
             </label>
             <label className="tick">
               <input
@@ -268,16 +271,16 @@ export function SettingsModal(p: SettingsModalProps) {
                   p.setRename({ ...p.rename, regex: e.target.checked })
                 }
               />
-              Regex
+              {t("settings.rename.regex")}
             </label>
-            <div className="pathoption">ArchiveFlow demande toujours une autorisation avant de raccourcir un nom.</div>
+            <div className="pathoption">{t("settings.rename.alwaysAsksPermission")}</div>
             <label>
-              Longueur relative maximale
+              {t("settings.rename.relativePathLimit")}
               <input type="number" min="100" max="220" value={p.rename.relativePathLimit || 180} onChange={(e) => p.setRename({ ...p.rename, relativePathLimit: +e.target.value })} />
-              <small>180 caractères recommandés pour laisser de la place au dossier choisi.</small>
+              <small>{t("settings.rename.relativePathLimitHint")}</small>
             </label>
             <div className="renamepreview">
-              <b>Aperçu</b>
+              <b>{t("settings.rename.preview")}</b>
               <code>
                 {p.rename.prefix}
                 {p.rename.pattern
@@ -292,9 +295,9 @@ export function SettingsModal(p: SettingsModalProps) {
         )}
         {p.tab === "duplicates" && (
           <section>
-            <label className="strictsave"><input type="checkbox" checked={p.preserveAll} onChange={(e) => p.setPreserveAll(e.target.checked)} /><span><b>Mode strict : conserver tous les fichiers</b><small>Recommandé. « Ignorer » devient « Conserver les deux » pour éviter toute disparition.</small></span></label>
-            <h3>Politique globale</h3>
-            {POLICIES.map(([id, label]) => (
+            <label className="strictsave"><input type="checkbox" checked={p.preserveAll} onChange={(e) => p.setPreserveAll(e.target.checked)} /><span><b>{t("settings.duplicates.strictMode")}</b><small>{t("settings.duplicates.strictModeHint")}</small></span></label>
+            <h3>{t("settings.duplicates.globalPolicy")}</h3>
+            {POLICY_KEYS.map(([id, labelKey]) => (
               <label className="policy" key={id}>
                 <input
                   type="radio"
@@ -302,32 +305,32 @@ export function SettingsModal(p: SettingsModalProps) {
                   onChange={() => p.setPolicy(id)}
                 />
                 <span>
-                  <b>{label}</b>
-                  <small>Détection par nom et SHA-256.</small>
+                  <b>{t(labelKey)}</b>
+                  <small>{t("settings.duplicates.detectionHint")}</small>
                 </span>
               </label>
             ))}
             <p className="safenote">
               <ShieldCheck />
-              Journal de récupération avant génération.
+              {t("settings.duplicates.recoveryJournal")}
             </p>
           </section>
         )}
         {p.tab === "security" && (
           <section>
-            <div className="safenote"><ShieldCheck /><div><b>Protection contre les bombes ZIP</b><small>L’archive est bloquée avant la décompression dès qu’une limite est dépassée.</small></div></div>
+            <div className="safenote"><ShieldCheck /><div><b>{t("settings.security.zipBombTitle")}</b><small>{t("settings.security.zipBombHint")}</small></div></div>
             <div className="formgrid securitygrid">
-              <label>Taille extraite maximale (Go)<input type="number" min="1" value={Math.round(p.security.maxExpandedBytes / 1073741824)} onChange={(e) => p.setSecurity({ ...p.security, maxExpandedBytes: Math.max(1, +e.target.value) * 1073741824 })} /></label>
-              <label>Nombre maximal de fichiers<input type="number" min="100" value={p.security.maxFiles} onChange={(e) => p.setSecurity({ ...p.security, maxFiles: Math.max(100, +e.target.value) })} /></label>
-              <label>Ratio de compression maximal<input type="number" min="10" value={p.security.maxRatio} onChange={(e) => p.setSecurity({ ...p.security, maxRatio: Math.max(10, +e.target.value) })} /></label>
-              <label>Profondeur maximale<input type="number" min="1" value={p.security.maxDepth} onChange={(e) => p.setSecurity({ ...p.security, maxDepth: Math.max(1, +e.target.value) })} /></label>
+              <label>{t("settings.security.maxExpandedSize")}<input type="number" min="1" value={Math.round(p.security.maxExpandedBytes / 1073741824)} onChange={(e) => p.setSecurity({ ...p.security, maxExpandedBytes: Math.max(1, +e.target.value) * 1073741824 })} /></label>
+              <label>{t("settings.security.maxFiles")}<input type="number" min="100" value={p.security.maxFiles} onChange={(e) => p.setSecurity({ ...p.security, maxFiles: Math.max(100, +e.target.value) })} /></label>
+              <label>{t("settings.security.maxRatio")}<input type="number" min="10" value={p.security.maxRatio} onChange={(e) => p.setSecurity({ ...p.security, maxRatio: Math.max(10, +e.target.value) })} /></label>
+              <label>{t("settings.security.maxDepth")}<input type="number" min="1" value={p.security.maxDepth} onChange={(e) => p.setSecurity({ ...p.security, maxDepth: Math.max(1, +e.target.value) })} /></label>
             </div>
-            <button onClick={() => p.setSecurity(DEFAULT_SECURITY_LIMITS)}>Rétablir les limites équilibrées</button>
+            <button onClick={() => p.setSecurity(DEFAULT_SECURITY_LIMITS)}>{t("settings.security.resetDefaults")}</button>
           </section>
         )}
         {p.tab === "categories" && (
           <section>
-            <h3>Catégories intégrées</h3>
+            <h3>{t("settings.categories.builtIn")}</h3>
             <div className="categorychips">
               {DEFAULT_CATEGORIES.map((c) => (
                 <span key={c.id}>
@@ -335,7 +338,7 @@ export function SettingsModal(p: SettingsModalProps) {
                 </span>
               ))}
             </div>
-            <h3>Personnalisées</h3>
+            <h3>{t("settings.categories.custom")}</h3>
             {p.cats.map((c) => (
               <article className="customcat" key={c.id}>
                 <input
@@ -380,16 +383,16 @@ export function SettingsModal(p: SettingsModalProps) {
                   ...p.cats,
                   {
                     id: crypto.randomUUID(),
-                    name: "Nouvelle catégorie",
+                    name: t("settings.categories.newCategory"),
                     extensions: [],
                     custom: true,
                   },
                 ])
               }
             >
-              + Créer une catégorie
+              {t("settings.categories.create")}
             </button>
-            <p>Les formats inconnus sont classés dans « Autres ».</p>
+            <p>{t("settings.categories.unknownNote")}</p>
           </section>
         )}
       </div>

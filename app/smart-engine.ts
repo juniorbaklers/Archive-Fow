@@ -1,4 +1,6 @@
 import { ArchiveEntry, ext } from "./archive-utils";
+import { Locale, TranslationKey, translate } from "./i18n";
+type Translator = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 export type CategoryDef = {
   id: string;
   name: string;
@@ -336,12 +338,12 @@ function makeWindowsSafePath(path: string, limit: number) {
   }
   return parts.join("/");
 }
-function pathSuffix(integrityProtected: boolean, pathAdjusted: boolean) {
+function pathSuffix(t: Translator, integrityProtected: boolean, pathAdjusted: boolean) {
   if (integrityProtected)
     return pathAdjusted
-      ? " • dossiers raccourcis pour Windows, noms de fichiers conservés (vérifiez les liens du projet SIG)"
-      : " • noms de dossiers protégés pour conserver les liens du projet SIG";
-  return pathAdjusted ? " • dossiers raccourcis pour Windows" : "";
+      ? t("explain.windowsShortenedSigKept")
+      : t("explain.sigNamesProtected");
+  return pathAdjusted ? t("explain.windowsShortened") : "";
 }
 export function enrichEntries(
   entries: ArchiveEntry[],
@@ -351,7 +353,9 @@ export function enrichEntries(
   policy: CollisionPolicy,
   classify = false,
   renameEnabled = false,
+  locale: Locale = "fr",
 ): SmartEntry[] {
+  const t: Translator = (key, vars) => translate(locale, key, vars);
   const sorted = [...rules]
       .filter((r) => r.enabled)
       .sort((a, b) => a.priority - b.priority),
@@ -377,7 +381,7 @@ export function enrichEntries(
       rule = classify ? sorted.find((r) => matches(e, category, r)) : undefined,
       familyStem = familyKeyFor(e),
       shape = familyMap.get(familyStem),
-      family = shape ? `Shapefile : ${fileBase(e.name)}` : undefined,
+      family = shape ? t("explain.shapefile", { name: fileBase(e.name) }) : undefined,
       familyIncomplete =
         !!shape && !["shp", "shx", "dbf"].every((x) => shape.has(x)),
       integrityProtected = protectedSources.has(e.source),
@@ -500,8 +504,8 @@ export function enrichEntries(
       pathUnsafe,
       needsPathDecision,
       explanation: rule
-        ? `Règle ${rule.priority} appliquée dans « ${sourceRoot} » sans déplacer le fichier hors de son dossier d’origine : ${rule.destination}${pathSuffix(integrityProtected, pathAdjusted)}`
-        : `Arborescence originale conservée dans « ${sourceRoot} »${pathSuffix(integrityProtected, pathAdjusted)}`,
+        ? t("explain.ruleApplied", { priority: rule.priority, root: sourceRoot, destination: rule.destination, suffix: pathSuffix(t, integrityProtected, pathAdjusted) })
+        : t("explain.originalTreeKept", { root: sourceRoot, suffix: pathSuffix(t, integrityProtected, pathAdjusted) }),
     };
     names.set(final.toLowerCase(), out);
     if (e.hash) hashes.set(e.hash, out);

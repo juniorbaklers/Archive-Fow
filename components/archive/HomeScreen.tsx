@@ -1,19 +1,27 @@
 import { Archive, ArchiveRestore, FolderOpen, History, ShieldCheck, Sparkles } from "lucide-react";
 import { HistoryEntry } from "./HistoryPanel";
-import { TranslationKey } from "@/app/i18n";
+import { Locale, TranslationKey } from "@/app/i18n";
+
+const HISTORY_ACTION_KEYS: Record<string, TranslationKey> = {
+  Extraction: "history.action.extract",
+  Création: "history.action.create",
+  Organisation: "history.action.organize",
+};
 
 export function HomeScreen({
   history,
   profiles,
   onStart,
   onSelectProfile,
+  locale,
   t,
 }: {
   history: HistoryEntry[];
-  profiles: { id: string; name: string; description: string }[];
+  profiles: { id: string; nameKey: TranslationKey; descriptionKey: TranslationKey }[];
   onStart: (mode: "extract" | "create") => void;
   onSelectProfile: (id: string) => void;
-  t: (key: TranslationKey) => string;
+  locale: Locale;
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
 }) {
   const recent = history.slice(0, 5);
   return (
@@ -57,10 +65,10 @@ export function HomeScreen({
               {recent.map((h) => (
                 <li key={h.id}>
                   <b>
-                    {h.action} — {h.format}
+                    {HISTORY_ACTION_KEYS[h.action] ? t(HISTORY_ACTION_KEYS[h.action]) : h.action} — {h.format}
                   </b>
                   <small>
-                    {h.count} fichiers · {new Date(h.date).toLocaleString("fr-FR")}
+                    {t("home.recentFiles", { count: h.count })} · {new Date(h.date).toLocaleString(locale === "en" ? "en-US" : "fr-FR")}
                   </small>
                 </li>
               ))}
@@ -78,8 +86,8 @@ export function HomeScreen({
             {profiles.map((p) => (
               <li key={p.id}>
                 <button onClick={() => onSelectProfile(p.id)}>
-                  <b>{p.name}</b>
-                  <small>{p.description}</small>
+                  <b>{t(p.nameKey)}</b>
+                  <small>{t(p.descriptionKey)}</small>
                 </button>
               </li>
             ))}

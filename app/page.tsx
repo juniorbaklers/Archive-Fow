@@ -55,7 +55,7 @@ import { FormatMatrixModal } from "@/components/archive/FormatMatrixModal";
 import { HistoryPanel, HistoryEntry } from "@/components/archive/HistoryPanel";
 import { HomeScreen } from "@/components/archive/HomeScreen";
 import { SettingsModal, SettingsTab } from "@/components/archive/SettingsModal";
-import { Locale, translate } from "./i18n";
+import { Locale, TranslationKey, translate } from "./i18n";
 type Mode = "extract" | "create";
 const DEF: RenameOptions = {
   pattern: "{nom}_{numero}",
@@ -79,14 +79,14 @@ type SaveReport = { detected: number; selected: number; saved: number; skipped: 
 type ArchiveReport = { id: string; name: string; root: string; count: number; status: "ok" | "empty" | "error"; message?: string };
 type PathDecision = "ask" | "shorten" | "preserve";
 export type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
-export const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string; policy?: CollisionPolicy; security?: Partial<SecurityLimits> }[] = [
-  { id: "custom", name: "Personnalisé", description: "Vos catégories et règles actuelles" },
-  { id: "sig", name: "SIG", category: "SIG", folder: "SIG", description: "Shapefiles, GeoJSON, GPKG, QGIS et données géographiques", policy: "keep-both", security: { maxDepth: 30 } },
-  { id: "documents", name: "Documents", category: "Bureautique", folder: "Documents", description: "Documents, PDF, tableurs et présentations", policy: "keep-both" },
-  { id: "media", name: "Médias", category: "Audio et vidéo", folder: "Médias", description: "Images, audio, vidéo et fichiers associés", policy: "keep-both", security: { maxFiles: 100000, maxExpandedBytes: 30 * 1024 ** 3 } },
-  { id: "developer", name: "Développeur", category: "Développement", folder: "Code", description: "Code source, configurations et documentation", policy: "keep-both", security: { maxFiles: 100000 } },
-  { id: "cad", name: "CAO / BIM", category: "CAO, BIM et scientifique", folder: "CAO-BIM", description: "Plans, modèles, maquettes et ressources techniques", policy: "keep-both", security: { maxExpandedBytes: 50 * 1024 ** 3 } },
-  { id: "science", name: "Scientifique", category: "Données", folder: "Données-scientifiques", description: "Jeux de données, bases, mesures et résultats", policy: "keep-both", security: { maxFiles: 200000, maxExpandedBytes: 50 * 1024 ** 3 } },
+export const PROFILES: { id: ProfileId; nameKey: TranslationKey; category?: string; folder?: string; descriptionKey: TranslationKey; policy?: CollisionPolicy; security?: Partial<SecurityLimits> }[] = [
+  { id: "custom", nameKey: "profile.custom.name", descriptionKey: "profile.custom.desc" },
+  { id: "sig", nameKey: "profile.sig.name", category: "SIG", folder: "SIG", descriptionKey: "profile.sig.desc", policy: "keep-both", security: { maxDepth: 30 } },
+  { id: "documents", nameKey: "profile.documents.name", category: "Bureautique", folder: "Documents", descriptionKey: "profile.documents.desc", policy: "keep-both" },
+  { id: "media", nameKey: "profile.media.name", category: "Audio et vidéo", folder: "Médias", descriptionKey: "profile.media.desc", policy: "keep-both", security: { maxFiles: 100000, maxExpandedBytes: 30 * 1024 ** 3 } },
+  { id: "developer", nameKey: "profile.developer.name", category: "Développement", folder: "Code", descriptionKey: "profile.developer.desc", policy: "keep-both", security: { maxFiles: 100000 } },
+  { id: "cad", nameKey: "profile.cad.name", category: "CAO, BIM et scientifique", folder: "CAO-BIM", descriptionKey: "profile.cad.desc", policy: "keep-both", security: { maxExpandedBytes: 50 * 1024 ** 3 } },
+  { id: "science", nameKey: "profile.science.name", category: "Données", folder: "Données-scientifiques", descriptionKey: "profile.science.desc", policy: "keep-both", security: { maxFiles: 200000, maxExpandedBytes: 50 * 1024 ** 3 } },
 ];
 const archivePattern = /\.(zip|tar|tar\.gz|tgz|gz|gzip|7z|rar)$/i;
 const hiddenOrSystem = (path: string) => path.split("/").some((part) => part.startsWith(".") || ["__MACOSX", "node_modules", "$RECYCLE.BIN", "System Volume Information"].includes(part));
@@ -98,10 +98,10 @@ function dl(data: Uint8Array, name: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(u), 1000);
 }
-function spaceStatusText(status: DestinationAnalysis["spaceStatus"]) {
-  if (status.kind === "unknown") return "espace de stockage non estimable par ce navigateur";
-  const label = `${formatBytes(status.availableBytes)} de stockage estimé disponible`;
-  return status.kind === "low" ? `${label} — proche de la limite, libérez de l’espace` : label;
+function spaceStatusText(status: DestinationAnalysis["spaceStatus"], t: (key: TranslationKey, vars?: Record<string, string | number>) => string) {
+  if (status.kind === "unknown") return t("space.unknown");
+  const label = t("space.available", { size: formatBytes(status.availableBytes) });
+  return status.kind === "low" ? `${label}${t("space.lowSuffix")}` : label;
 }
 export default function Home() {
   const [mode, setMode] = useState<Mode>("extract"),
@@ -211,7 +211,7 @@ export default function Home() {
   useEffect(() => {
     try { localStorage.setItem("archiveflow-locale", locale); } catch {}
   }, [locale]);
-  const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
+  const t = (key: TranslationKey, vars?: Record<string, string | number>) => translate(locale, key, vars);
   const effectivePolicy: CollisionPolicy = preserveAll && policy === "skip" ? "keep-both" : policy;
   const basePlanned = useMemo(
       () =>
@@ -223,8 +223,9 @@ export default function Home() {
           effectivePolicy,
           classify,
           mode === "create" ? false : renameEnabled,
+          locale,
         ),
-      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled, pathDecision, mode],
+      [entries, rules, cats, rename, effectivePolicy, classify, renameEnabled, pathDecision, mode, locale],
     ),
     planned = useMemo(() => basePlanned.map((entry) => {
       const override = overrides[entryKey(entry)];
@@ -299,7 +300,7 @@ export default function Home() {
       let all: ArchiveEntry[] = [];
       if (mode === "extract") {
         setEntries([]);
-        const { groups, rest } = detectMultiPart(rawFiles);
+        const { groups, rest } = detectMultiPart(rawFiles, locale);
         const unsupportedReports: ArchiveReport[] = groups
           .filter((g) => g.kind === "unsupported")
           .map((g, i) => ({ id: `multipart-${i}`, name: g.files.map((f) => f.name).join(", "), root: g.files[0].name, count: 0, status: "error" as const, message: g.reason }));
@@ -315,26 +316,26 @@ export default function Home() {
           seen.set(key, occurrence);
           const root = (totals.get(key) || 0) > 1 ? `${base}__archive_${occurrence}` : base;
           try {
-            const extracted = await readArchive(f, security);
+            const extracted = await readArchive(f, security, locale);
             let identified = extracted.map((entry) => ({ ...entry, source: root }));
             if (extractNested) identified = await extractNestedArchives(identified, security);
             all.push(...identified);
-            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : "Aucun fichier trouvé" });
+            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : t("msg.noFileFoundInArchive") });
           } catch (archiveError) {
-            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
+            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : t("msg.readImpossible") });
           }
           setAnalyzeProgress({ done: index + 1, total: fs.length });
         }
         setArchiveReports(reports);
         const failures = reports.filter((report) => report.status !== "ok");
-        if (failures.length) setError(`${failures.length} archive(s) n’ont pas été entièrement analysées. Consultez le bilan par archive ci-dessous.`);
+        if (failures.length) setError(t("msg.archivesNotFullyAnalyzed", { count: failures.length }));
         const duplicateBases = [...new Set(baseNames.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
-        if (duplicateBases.length) setNameWarning(`Attention : plusieurs archives sélectionnées portent le même nom (${duplicateBases.join(", ")}). Elles ont été numérotées automatiquement pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une erreur de sélection. Vous pouvez tout de même continuer.`);
+        if (duplicateBases.length) setNameWarning(t("msg.duplicateArchiveNames", { names: duplicateBases.join(", ") }));
       } else {
         setArchiveReports([]);
         const existingNames = new Set(entries.filter((e) => !e.directory).map((e) => e.name.toLowerCase()));
         const duplicateNames = [...new Set(rawFiles.filter((f) => existingNames.has(f.name.toLowerCase())).map((f) => f.name))];
-        if (duplicateNames.length) setNameWarning(`Attention : ${duplicateNames.length > 1 ? "des fichiers portent des noms déjà ajoutés" : "un fichier porte un nom déjà ajouté"} (${duplicateNames.join(", ")}). Vérifiez qu’il ne s’agit pas d’une sélection en double. Vous pouvez tout de même continuer.`);
+        if (duplicateNames.length) setNameWarning(t("msg.duplicateFileNames", { which: t(duplicateNames.length > 1 ? "msg.duplicateFileNamesPlural" : "msg.duplicateFileNameSingular"), names: duplicateNames.join(", ") }));
         let done = 0;
         const added = await Promise.all(
           rawFiles.map(async (f) => {
@@ -343,7 +344,7 @@ export default function Home() {
               size: f.size,
               data: new Uint8Array(await f.arrayBuffer()),
               date: new Date(f.lastModified),
-              source: "Fichiers ajoutés",
+              source: t("sources.addedFilesGroup"),
             };
             done += 1;
             setAnalyzeProgress({ done, total: rawFiles.length });
@@ -354,7 +355,7 @@ export default function Home() {
       }
       await loadEntries(all);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Analyse impossible");
+      setError(e instanceof Error ? e.message : t("msg.analysisImpossible"));
     } finally {
       setBusy(false);
       setAnalyzeProgress(null);
@@ -362,7 +363,7 @@ export default function Home() {
   }
   async function processFolderArchives(items: FolderArchive[]) {
     const chosen = items.filter((item) => item.included);
-    if (!chosen.length) { setError("Aucune archive sélectionnée dans ce dossier."); return; }
+    if (!chosen.length) { setError(t("msg.noArchiveSelectedInFolder")); return; }
     setBusy(true); setError(""); setNameWarning(""); setAnalyzeProgress({ done: 0, total: chosen.length });
     try {
       setEntries([]);
@@ -378,13 +379,13 @@ export default function Home() {
       for (let index = 0; index < chosen.length; index += 1) {
         const item = chosen[index], root = roots[index];
         try {
-          const extracted = await readArchive(item.file, security);
+          const extracted = await readArchive(item.file, security, locale);
           let identified = extracted.map((entry) => ({ ...entry, source: root }));
           if (extractNested) identified = await extractNestedArchives(identified, security);
           all.push(...identified);
           reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: identified.length, status: identified.length ? "ok" : "empty" });
         } catch (archiveError) {
-          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : "Lecture impossible" });
+          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : t("msg.readImpossible") });
         }
         setAnalyzeProgress({ done: index + 1, total: chosen.length });
       }
@@ -392,22 +393,22 @@ export default function Home() {
       await loadEntries(all);
       setFolderArchives([]);
       const duplicateBases = [...new Set(bases.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
-      if (duplicateBases.length) setNameWarning(`Attention : plusieurs archives du dossier portent le même nom (${duplicateBases.join(", ")}). Elles ont été numérotées automatiquement pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une erreur de sélection. Vous pouvez tout de même continuer.`);
-    } catch (e) { setError(e instanceof Error ? e.message : "Analyse récursive impossible"); }
+      if (duplicateBases.length) setNameWarning(t("msg.duplicateFolderArchiveNames", { names: duplicateBases.join(", ") }));
+    } catch (e) { setError(e instanceof Error ? e.message : t("msg.recursiveAnalysisImpossible")); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
   async function addFolder(l: FileList | null) {
     if (!l?.length) return;
     const found = Array.from(l).map((file) => ({ file, path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name, included: true }))
       .filter((item) => archivePattern.test(item.file.name) && (includeHidden || !hiddenOrSystem(item.path)));
-    if (!found.length) { setError("Aucune archive compatible trouvée dans ce dossier."); return; }
+    if (!found.length) { setError(t("msg.noCompatibleArchiveInFolder")); return; }
     if (folderMode === "auto") await processFolderArchives(found);
     else setFolderArchives(found);
   }
   function uniqueSourceName(base: string) {
     const used = new Set(entries.map((e) => e.source.toLowerCase()));
     if (!used.has(base.toLowerCase())) return base;
-    setNameWarning(`Attention : un dossier nommé « ${base} » a déjà été ajouté. Le nouveau a été numéroté pour éviter toute confusion — vérifiez qu’il ne s’agit pas d’une sélection en double. Vous pouvez tout de même continuer.`);
+    setNameWarning(t("msg.duplicateFolderName", { name: base }));
     for (let n = 2; ; n += 1) {
       const candidate = `${base} (${n})`;
       if (!used.has(candidate.toLowerCase())) return candidate;
@@ -497,7 +498,7 @@ export default function Home() {
       ...profileCategories.map((category, index) => ({ id: `profile-${id}-${index}`, priority: index + 1, enabled: true, field: "category" as const, operator: "equals" as const, value: category, destination: `{projet}/${selected.folder}/{category}/{annee}` })),
       { id: `profile-${id}-other`, priority: 99, enabled: true, field: "name", operator: "contains", value: "", destination: `{projet}/Autres/{category}` },
     ]);
-    setRename((current) => ({ ...current, project: selected.name }));
+    setRename((current) => ({ ...current, project: t(selected.nameKey) }));
     if (selected.policy) setPolicy(selected.policy);
     if (selected.security) setSecurity((current) => ({ ...current, ...selected.security }));
   }
@@ -532,7 +533,7 @@ export default function Home() {
   async function chooseDestination(runAfter = false) {
     setError("");
     try {
-      const handle = await pickDestination();
+      const handle = await pickDestination(locale);
       setDestination(handle);
       if (planned.length) {
         setDestinationBusy(true);
@@ -540,7 +541,7 @@ export default function Home() {
       }
       if (runAfter) await produce(true, handle);
     } catch (e) {
-      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Dossier inaccessible");
+      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : t("msg.folderInaccessible"));
     } finally { setDestinationBusy(false); }
   }
   function hist(a: string, f: string) {
@@ -559,7 +560,7 @@ export default function Home() {
   }
   async function verifyProduced(data: Uint8Array, filename: string, mime: string, expectedCount: number, expectedBytes: number) {
     try {
-      const reread = await readArchive(new File([data as BlobPart], filename, { type: mime }), security);
+      const reread = await readArchive(new File([data as BlobPart], filename, { type: mime }), security, locale);
       const actualBytes = reread.reduce((sum, e) => sum + e.size, 0);
       return reread.length === expectedCount && actualBytes === expectedBytes;
     } catch {
@@ -569,19 +570,19 @@ export default function Home() {
   async function produce(folder = false, selected?: FileSystemDirectoryHandle) {
     if (!planned.length) return;
     if (mode === "extract" && longPathCandidates && pathDecision === "ask") {
-      setError("Choisissez d’abord comment traiter les chemins trop longs. Aucun nom ne sera raccourci sans votre autorisation.");
+      setError(t("msg.choosePathDecisionFirst"));
       return;
     }
     const failedArchives = archiveReports.filter((report) => report.status !== "ok");
     if (failedArchives.length) {
-      setError(`Opération bloquée : ${failedArchives.length} archive(s) n’ont pas été correctement analysées. Aucun résultat incomplet ne sera créé.`);
+      setError(t("msg.archivesNotCorrectlyAnalyzed", { count: failedArchives.length }));
       return;
     }
     const selectedEntries = planned.filter((e) => e.included !== false && !excluded.has(entryKey(e)));
     const outputFiles = selectedEntries.filter((e) => !e.directory), outputPaths = new Set(outputFiles.map((e) => (e.planned || e.name).toLowerCase()));
     setLastReport(null);
     if (outputPaths.size !== outputFiles.length) {
-      setError(`Opération bloquée : ${outputFiles.length - outputPaths.size} fichier(s) partageraient encore le même chemin de sortie. Aucun fichier n’a été créé.`);
+      setError(t("msg.duplicateOutputPaths", { count: outputFiles.length - outputPaths.size }));
       return;
     }
     setBusy(true);
@@ -599,7 +600,7 @@ export default function Home() {
       if (
         effectivePolicy === "replace-confirm" &&
         dupes &&
-        !confirm("Confirmer le remplacement des conflits ?")
+        !confirm(t("msg.confirmReplaceConflicts"))
       )
         return;
       const u = selectedEntries;
@@ -610,28 +611,28 @@ export default function Home() {
         setDestinationAnalysis(analysis);
         const structural = analysis.conflicts.filter((c) => c.kind === "file-vs-folder" || c.kind === "folder-vs-file");
         if (structural.length) {
-          setError(`Opération bloquée avant écriture : ${structural.length} conflit(s) fichier/dossier empêcheraient de conserver tous les éléments. Choisissez une autre destination ou renommez le dossier en conflit.`);
+          setError(t("msg.structuralConflicts", { count: structural.length }));
           return;
         }
         const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
-        if (effectivePolicy === "replace-confirm" && dangerous.length && !confirm(`Remplacer explicitement ${dangerous.length} fichier(s) existant(s) ?`)) return;
+        if (effectivePolicy === "replace-confirm" && dangerous.length && !confirm(t("msg.confirmReplaceExplicit", { count: dangerous.length }))) return;
         const controller = new AbortController(); abortRef.current = controller;
         setProgress({ written: 0, skipped: 0, current: "Préparation" });
         const journal = { ...j, destination: root.name, written: 0, skipped: 0 };
         const result = await writeToDestination(root, u, effectivePolicy, controller.signal, (written, skipped, current) => {
           setProgress({ written, skipped, current });
           localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
-        });
-        if (result.written + result.skipped !== u.length) throw Error("Contrôle d’intégrité échoué : le nombre d’éléments traités ne correspond pas à la sélection.");
+        }, locale);
+        if (result.written + result.skipped !== u.length) throw Error(t("msg.integrityCheckFailedWrite"));
         const savedFiles = Math.max(0, outputFiles.length - result.skipped);
         setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: result.skipped, complete: result.skipped === 0 && savedFiles === outputFiles.length });
         localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: u.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
-        if (result.skipped) setError(`${result.skipped} élément(s) n’ont pas été écrits en raison de la politique choisie ou d’un conflit de destination. Consultez la simulation avant de recommencer.`);
+        if (result.skipped) setError(t("msg.someItemsNotWritten", { count: result.skipped }));
         hist("Organisation", "Dossier");
       } else {
         async function buildArchive(archiveEntries: ArchiveEntry[], archiveFiles: ArchiveEntry[], baseName: string) {
           if (output === "GZIP") {
-            if (archiveFiles.length !== 1) throw Error("GZIP ne peut compresser qu’un seul fichier à la fois. Choisissez TAR.GZ pour plusieurs fichiers.");
+            if (archiveFiles.length !== 1) throw Error(t("msg.gzipSingleFileOnly"));
             return { data: await makeGzip(archiveFiles[0]), filename: `${baseName}.gz`, mime: "application/gzip" };
           }
           if (output === "TAR") return { data: makeTar(archiveEntries), filename: `${baseName}.tar`, mime: "application/x-tar" };
@@ -643,7 +644,7 @@ export default function Home() {
         const multi = buckets.length > 1;
         if (multi) {
           const oversized = buckets.filter((bucket) => bucket.length === 1 && bucket[0].size > maxBytes).length;
-          if (oversized) setError(`${oversized} fichier(s) dépassent à eux seuls la taille maximale par archive ; ils ont chacun été placés dans leur propre archive, un peu plus grande que la limite demandée (un fichier ne peut pas être coupé).`);
+          if (oversized) setError(t("msg.oversizedFilesInVolumes", { count: oversized }));
         }
         const directoryEntries = selectedEntries.filter((e) => e.directory);
         let saved = 0;
@@ -652,7 +653,7 @@ export default function Home() {
           const built = await buildArchive(multi ? [...directoryEntries, ...bucketFiles] : u, bucketFiles, baseName);
           const expectedBytes = bucketFiles.reduce((sum, e) => sum + e.size, 0);
           const verified = await verifyProduced(built.data, built.filename, built.mime, bucketFiles.length, expectedBytes);
-          if (!verified) throw Error(`Contrôle d’intégrité échoué après la création de ${built.filename} : le contenu relu ne correspond pas à la sélection. Aucun fichier n’a été proposé au téléchargement.`);
+          if (!verified) throw Error(t("msg.integrityCheckFailedCreate", { filename: built.filename }));
           dl(built.data, built.filename, built.mime);
           saved += bucketFiles.length;
         }
@@ -669,7 +670,7 @@ export default function Home() {
         JSON.stringify({ ...j, status: "erreur" }),
       );
       const cancelled = e instanceof DOMException && e.name === "AbortError";
-      setError(cancelled ? "Opération annulée. Les fichiers déjà écrits sont conservés dans le journal." : e instanceof Error ? e.message : "Opération impossible");
+      setError(cancelled ? t("msg.operationCancelled") : e instanceof Error ? e.message : t("msg.operationImpossible"));
     } finally {
       abortRef.current = null;
       setProgress(null);
@@ -707,7 +708,7 @@ export default function Home() {
       setClassify(c.classify || false);
       setRenameEnabled(c.renameEnabled || false);
     } catch {
-      setError("JSON invalide");
+      setError(t("msg.invalidJson"));
     }
   }
   return (
@@ -727,6 +728,7 @@ export default function Home() {
       {screen === "home" && (
         <HomeScreen
           t={t}
+          locale={locale}
           history={history}
           profiles={PROFILES.filter((p) => p.id !== "custom")}
           onStart={(startMode) => { setMode(startMode); setScreen("workspace"); }}
@@ -741,17 +743,17 @@ export default function Home() {
             <h1>{t("workspace.title")}</h1>
             <p>{t("workspace.subtitle")}</p>
           </div>
-          <button className="formats" onClick={() => setFormatsOpen(true)} title="Voir la matrice complète des formats">
+          <button className="formats" onClick={() => setFormatsOpen(true)} title={t("formats.title")}>
             <span>
-              ZIP <b>Complet</b>
+              ZIP <b>{t("formats.zipComplete")}</b>
             </span>
             <span>
-              TAR/GZIP <b>Complet</b>
+              TAR/GZIP <b>{t("formats.tarGzipComplete")}</b>
             </span>
             <span>
-              7Z/RAR <b>Extraction</b>
+              7Z/RAR <b>{t("formats.sevenZipRarExtraction")}</b>
             </span>
-            <small>Voir les détails</small>
+            <small>{t("formats.seeDetails")}</small>
           </button>
         </div>
         <div className="v2tabs">
@@ -774,7 +776,7 @@ export default function Home() {
           <aside className="controls">
             <section>
               <h2>
-                <span>1</span>Fichiers sources
+                <span>1</span>{t("sources.heading")}
               </h2>
               <input
                 ref={input}
@@ -797,31 +799,31 @@ export default function Home() {
                 }}
               >
                 <UploadCloud />
-                <strong>Ajouter des fichiers</strong>
-                <small>Glissez-déposez ou parcourez</small>
+                <strong>{t("sources.addFiles")}</strong>
+                <small>{t("sources.dragOrBrowse")}</small>
               </button>
               {mode === "extract" && (
                 <div className="folderimport">
-                  <button onClick={() => folderInput.current?.click()}><FolderTree />Importer un dossier récursivement</button>
-                  <label><input type="radio" checked={folderMode === "choose"} onChange={() => setFolderMode("choose")} /> Choisir les archives avant analyse</label>
-                  <label><input type="radio" checked={folderMode === "auto"} onChange={() => setFolderMode("auto")} /> Analyser automatiquement</label>
-                  <label title="Recommandé pour éviter les fichiers inutiles et sensibles"><input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} /> Inclure les dossiers cachés et système</label>
-                  <label title="Ouvre les archives trouvées à l’intérieur d’autres archives, jusqu’à 3 niveaux de profondeur"><input type="checkbox" checked={extractNested} onChange={(e) => setExtractNested(e.target.checked)} /> Extraire aussi les archives imbriquées</label>
+                  <button onClick={() => folderInput.current?.click()}><FolderTree />{t("sources.importFolderRecursive")}</button>
+                  <label><input type="radio" checked={folderMode === "choose"} onChange={() => setFolderMode("choose")} /> {t("sources.chooseBeforeAnalysis")}</label>
+                  <label><input type="radio" checked={folderMode === "auto"} onChange={() => setFolderMode("auto")} /> {t("sources.analyzeAutomatically")}</label>
+                  <label title={t("sources.includeHiddenTitle")}><input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} /> {t("sources.includeHidden")}</label>
+                  <label title={t("sources.extractNestedTitle")}><input type="checkbox" checked={extractNested} onChange={(e) => setExtractNested(e.target.checked)} /> {t("sources.extractNested")}</label>
                 </div>
               )}
               {mode === "create" && (
                 <div className="folderimport createfolder">
-                  <button onClick={pickCompleteCreateFolder}><FolderTree />Importer un dossier complet</button>
-                  <label><input type="checkbox" checked={preserveRoot} onChange={(e) => setPreserveRoot(e.target.checked)} /> Conserver le dossier racine</label>
-                  <label><input type="checkbox" checked={preserveEmpty} onChange={(e) => setPreserveEmpty(e.target.checked)} /> Conserver les dossiers vides</label>
-                  <small>Répétez « Ajouter des fichiers » ou « Importer un dossier complet » pour combiner plusieurs dossiers ou fichiers dans la même archive. Vous pourrez exclure les fichiers ou sous-dossiers dans la simulation.</small>
+                  <button onClick={pickCompleteCreateFolder}><FolderTree />{t("sources.importFullFolder")}</button>
+                  <label><input type="checkbox" checked={preserveRoot} onChange={(e) => setPreserveRoot(e.target.checked)} /> {t("sources.preserveRoot")}</label>
+                  <label><input type="checkbox" checked={preserveEmpty} onChange={(e) => setPreserveEmpty(e.target.checked)} /> {t("sources.preserveEmpty")}</label>
+                  <small>{t("sources.createFolderHint")}</small>
                 </div>
               )}
               {folderArchives.length > 0 && (
                 <div className="foldercandidates">
-                  <b>{folderArchives.filter((item) => item.included).length} archive(s) sélectionnée(s)</b>
+                  <b>{t("sources.selectedArchives", { count: folderArchives.filter((item) => item.included).length })}</b>
                   <div>{folderArchives.map((item, index) => <label key={item.path}><input type="checkbox" checked={item.included} onChange={() => setFolderArchives((current) => current.map((value, i) => i === index ? { ...value, included: !value.included } : value))} /><span>{item.path}</span></label>)}</div>
-                  <footer><button onClick={() => setFolderArchives((current) => current.map((item) => ({ ...item, included: true })))}>Tout</button><button onClick={() => setFolderArchives([])}>Annuler</button><button onClick={() => processFolderArchives(folderArchives)}>Analyser la sélection</button></footer>
+                  <footer><button onClick={() => setFolderArchives((current) => current.map((item) => ({ ...item, included: true })))}>{t("sources.selectAll")}</button><button onClick={() => setFolderArchives([])}>{t("sources.cancel")}</button><button onClick={() => processFolderArchives(folderArchives)}>{t("sources.analyzeSelection")}</button></footer>
                 </div>
               )}
               {sourceGroups.length > 0 && (
@@ -830,9 +832,9 @@ export default function Home() {
                     <div className="source-summary">
                       <b>{sourceGroups.length}</b>
                       <span>
-                        éléments au total<small>{formatBytes(total)}</small>
+                        {t("sources.totalItems")}<small>{formatBytes(total)}</small>
                       </span>
-                      <button title="Tout retirer" onClick={() => reset()}>
+                      <button title={t("sources.removeAll")} onClick={() => reset()}>
                         <Trash2 />
                       </button>
                     </div>
@@ -843,7 +845,7 @@ export default function Home() {
                       <span>
                         {g.source}<small>{formatBytes(g.size)}</small>
                       </span>
-                      <button title="Retirer" onClick={() => removeSource(g.source)}>
+                      <button title={t("sources.remove")} onClick={() => removeSource(g.source)}>
                         <Trash2 />
                       </button>
                     </div>
@@ -853,30 +855,30 @@ export default function Home() {
             </section>
             <section>
               <h2>
-                <span>2</span>Moteur intelligent
+                <span>2</span>{t("engine.heading")}
               </h2>
               <label className="preserve-note">
                 <ShieldCheck />
                 <span>
-                  <b>Arborescence originale conservée</b>
-                  <small>Un dossier séparé par archive</small>
+                  <b>{t("engine.originalTreeKept")}</b>
+                  <small>{t("engine.oneFolderPerArchive")}</small>
                 </span>
               </label>
               <label className="profilepicker">
-                Profil métier
+                {t("engine.businessProfile")}
                 <select value={profile} onChange={(e) => applyProfile(e.target.value as ProfileId)}>
-                  {PROFILES.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+                  {PROFILES.map((item) => <option value={item.id} key={item.id}>{t(item.nameKey)}</option>)}
                 </select>
-                <small>{PROFILES.find((item) => item.id === profile)?.description}</small>
+                <small>{t(PROFILES.find((item) => item.id === profile)!.descriptionKey)}</small>
               </label>
-              {profile !== "custom" && <div className="profileactive"><ShieldCheck /><span><b>Profil {PROFILES.find((item) => item.id === profile)?.name} actif</b><small>Règles, politique de doublons et seuils de sécurité appliqués automatiquement — modifiables dans Paramètres.</small></span></div>}
+              {profile !== "custom" && <div className="profileactive"><ShieldCheck /><span><b>{t("engine.profileActive", { name: t(PROFILES.find((item) => item.id === profile)!.nameKey) })}</b><small>{t("engine.profileActiveHint")}</small></span></div>}
               <label className="optioncheck">
                 <input
                   type="checkbox"
                   checked={classify}
                   onChange={(e) => setClassify(e.target.checked)}
                 />
-                Activer le classement intelligent
+                {t("engine.enableClassification")}
               </label>
               {mode === "extract" && (
                 <>
@@ -886,10 +888,10 @@ export default function Home() {
                       checked={renameEnabled}
                       onChange={(e) => setRenameEnabled(e.target.checked)}
                     />
-                    Renommer les fichiers et les dossiers
+                    {t("engine.renameFilesAndFolders")}
                   </label>
                   <label>
-                    Modèle
+                    {t("engine.pattern")}
                     <input
                       disabled={!renameEnabled}
                       value={rename.pattern}
@@ -902,21 +904,21 @@ export default function Home() {
                 </>
               )}
               {mode === "create" && (
-                <small className="why">Les noms de fichiers et de dossiers restent identiques lors de la création d’une archive.</small>
+                <small className="why">{t("engine.createModeNamesUnchanged")}</small>
               )}
               <button className="enginebtn" onClick={() => setSettings(true)}>
                 <Settings2 />
-                Configurer les règles
+                {t("engine.configureRules")}
               </button>
             </section>
             <section>
               <h2>
-                <span>3</span>Destination
+                <span>3</span>{t("destination.heading")}
               </h2>
               {mode === "create" && (
                 <>
                   <label>
-                    Nom
+                    {t("destination.name")}
                     <input value={name} onChange={(e) => setName(e.target.value)} />
                   </label>
                   <div className="formatselect">
@@ -925,7 +927,7 @@ export default function Home() {
                         className={output === f ? "on" : ""}
                         key={f}
                         disabled={f === "GZIP" && selectableFileCount !== 1}
-                        title={f === "GZIP" && selectableFileCount !== 1 ? "GZIP ne compresse qu’un seul fichier à la fois" : undefined}
+                        title={f === "GZIP" && selectableFileCount !== 1 ? t("destination.gzipSingleFileOnly") : undefined}
                         onClick={() => setOutput(f)}
                       >
                         {f}
@@ -939,16 +941,16 @@ export default function Home() {
                         checked={zipCompression === "deflate"}
                         onChange={(e) => setZipCompression(e.target.checked ? "deflate" : "store")}
                       />
-                      Compresser le ZIP (plus lent, fichier plus petit)
+                      {t("destination.compressZip")}
                     </label>
                   )}
                   <label>
-                    Taille maximale par archive <small>(Mo, facultatif)</small>
+                    {t("destination.maxArchiveSize")} <small>{t("destination.maxArchiveSizeUnit")}</small>
                     <input
                       type="number"
                       min="1"
                       inputMode="numeric"
-                      placeholder="Illimitée"
+                      placeholder={t("destination.maxArchiveSizeUnlimited")}
                       value={maxArchiveSizeMb}
                       disabled={output === "GZIP"}
                       onChange={(e) => setMaxArchiveSizeMb(e.target.value)}
@@ -956,7 +958,7 @@ export default function Home() {
                   </label>
                   {Number(maxArchiveSizeMb) > 0 && (
                     <small className="why">
-                      Le découpage se base sur la taille d’origine des fichiers (avant compression) : chaque archive produite restera à la taille indiquée ou en dessous. Au-delà de cette taille, le téléchargement produira plusieurs archives complètes et indépendantes (« {name}_part1 », « {name}_part2 », …) — pas un format de volumes multi-parties officiel (.z01, .part1.rar).
+                      {t("destination.maxArchiveSizeHint", { name })}
                     </small>
                   )}
                 </>
@@ -965,31 +967,30 @@ export default function Home() {
                 <div className="estimatebox">
                   <Layers3 />
                   <div>
-                    <b>Estimation avant traitement</b>
+                    <b>{t("destination.estimateHeading")}</b>
                     <small>
-                      {formatBytes(estimate.totalBytes)} à traiter
+                      {t("destination.estimateToProcess", { size: formatBytes(estimate.totalBytes) })}
                       {mode === "create" && estimate.estimatedOutputBytes !== estimate.totalBytes
-                        ? ` • environ ${formatBytes(estimate.estimatedOutputBytes)} une fois compressé`
+                        ? t("destination.estimateCompressed", { size: formatBytes(estimate.estimatedOutputBytes) })
                         : ""}
-                      {" "}• environ {formatDuration(estimate.estimatedSeconds)} estimée(s) — dépend de votre appareil
+                      {t("destination.estimateDuration", { duration: formatDuration(estimate.estimatedSeconds) })}
                     </small>
                   </div>
                 </div>
               )}
               <div className="destinationchoice">
-                <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}><HardDrive />{destination ? `Dossier : ${destination.name}` : "Choisir le dossier maintenant"}</button>
-                {destination && <button className="removedestination" title="Retirer le dossier choisi" onClick={() => { setDestination(null); setDestinationAnalysis(null); }}><XCircle /></button>}
+                <button className="destinationbtn" disabled={destinationBusy} onClick={() => chooseDestination(false)}><HardDrive />{destination ? t("destination.folderLabel", { name: destination.name }) : t("destination.chooseNow")}</button>
+                {destination && <button className="removedestination" title={t("destination.removeChosen")} onClick={() => { setDestination(null); setDestinationAnalysis(null); }}><XCircle /></button>}
               </div>
-              {destination && <small className="destinationhint">Vous pourrez aussi le changer après la simulation.</small>}
+              {destination && <small className="destinationhint">{t("destination.hintChangeAfter")}</small>}
             </section>
           </aside>
           <section className="preview">
             <div className="previewhead">
               <div>
-                <h2>Simulation du résultat</h2>
+                <h2>{t("preview.simulationTitle")}</h2>
                 <p>
-                  {planned.length} fichiers • {dupes} conflits • {incomplete}{" "}
-                  groupes incomplets • {shortenedPaths} chemins sécurisés
+                  {t("preview.summary", { count: planned.length, conflicts: dupes, incomplete, shortened: shortenedPaths })}
                 </p>
               </div>
               <div className="viewbuttons">
@@ -1010,38 +1011,38 @@ export default function Home() {
             <div className="search">
               <Search />
               <input
-                placeholder="Rechercher…"
+                placeholder={t("preview.search")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
-              <button className={filtersOpen ? "on" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter />Filtres</button>
+              <button className={filtersOpen ? "on" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter />{t("preview.filters")}</button>
             </div>
             {filtersOpen && planned.length > 0 && (
               <div className="advancedfilters">
-                <label>Tri<select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="name">Nom</option><option value="size">Taille</option><option value="date">Date</option><option value="category">Catégorie</option><option value="source">Archive source</option></select></label>
-                <label>Ordre<select value={sortDirection} onChange={(e) => setSortDirection(e.target.value as "asc" | "desc")}><option value="asc">Croissant</option><option value="desc">Décroissant</option></select></label>
-                <label>Catégorie<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}><option value="all">Toutes</option>{[...new Set(planned.map((e) => e.category))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
-                <label>Archive<select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}><option value="all">Toutes</option>{[...new Set(planned.map((e) => e.source))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
-                <label>Sélection<select value={selectionFilter} onChange={(e) => setSelectionFilter(e.target.value)}><option value="all">Tous</option><option value="selected">Inclus</option><option value="excluded">Exclus</option></select></label>
-                <label>Taille min. (Mo)<input type="number" min="0" value={minSize} onChange={(e) => setMinSize(e.target.value)} /></label>
-                <label>Taille max. (Mo)<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
-                <button onClick={() => { setQuery(""); setCategoryFilter("all"); setSourceFilter("all"); setSelectionFilter("all"); setMinSize(""); setMaxSize(""); setSortBy("name"); setSortDirection("asc"); }}>Réinitialiser</button>
+                <label>{t("preview.sort")}<select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="name">{t("preview.sortName")}</option><option value="size">{t("preview.sortSize")}</option><option value="date">{t("preview.sortDate")}</option><option value="category">{t("preview.sortCategory")}</option><option value="source">{t("preview.sortSource")}</option></select></label>
+                <label>{t("preview.order")}<select value={sortDirection} onChange={(e) => setSortDirection(e.target.value as "asc" | "desc")}><option value="asc">{t("preview.orderAsc")}</option><option value="desc">{t("preview.orderDesc")}</option></select></label>
+                <label>{t("preview.category")}<select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}><option value="all">{t("preview.categoryAll")}</option>{[...new Set(planned.map((e) => e.category))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label>{t("preview.archive")}<select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}><option value="all">{t("preview.archiveAll")}</option>{[...new Set(planned.map((e) => e.source))].sort().map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label>{t("preview.selection")}<select value={selectionFilter} onChange={(e) => setSelectionFilter(e.target.value)}><option value="all">{t("preview.selectionAll")}</option><option value="selected">{t("preview.selectionIncluded")}</option><option value="excluded">{t("preview.selectionExcluded")}</option></select></label>
+                <label>{t("preview.minSize")}<input type="number" min="0" value={minSize} onChange={(e) => setMinSize(e.target.value)} /></label>
+                <label>{t("preview.maxSize")}<input type="number" min="0" value={maxSize} onChange={(e) => setMaxSize(e.target.value)} /></label>
+                <button onClick={() => { setQuery(""); setCategoryFilter("all"); setSourceFilter("all"); setSelectionFilter("all"); setMinSize(""); setMaxSize(""); setSortBy("name"); setSortDirection("asc"); }}>{t("preview.reset")}</button>
               </div>
             )}
             {planned.length > 0 && (
               <div className="selectionbar">
-                <strong>{selectedCount} sur {planned.length} sélectionné(s)</strong>
-                <button onClick={() => setAllSelection("all")}>Tout sélectionner</button>
-                <button onClick={() => setAllSelection("none")}>Tout exclure</button>
-                <button onClick={() => setAllSelection("invert")}>Inverser</button>
+                <strong>{t("preview.selectedOf", { selected: selectedCount, total: planned.length })}</strong>
+                <button onClick={() => setAllSelection("all")}>{t("preview.selectAll")}</button>
+                <button onClick={() => setAllSelection("none")}>{t("preview.selectNone")}</button>
+                <button onClick={() => setAllSelection("invert")}>{t("preview.invert")}</button>
               </div>
             )}
             {planned.length > 0 && (
               <div className="bulkbar">
-                <span><ArrowUpDown /><b>Modification en masse</b><small>sur les {selectedCount} éléments inclus</small></span>
-                <div><select value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)}><option value="">Catégorie…</option>{[...DEFAULT_CATEGORIES, ...cats].map((category) => <option key={category.id}>{category.name}</option>)}</select><button onClick={() => applyBulk("category")}>Appliquer</button></div>
-                <div><input placeholder="Déplacer vers le dossier…" value={bulkFolder} onChange={(e) => setBulkFolder(e.target.value)} /><button onClick={() => applyBulk("folder")}>Déplacer</button></div>
-                <div><input placeholder="Préfixe de renommage…" value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} /><button onClick={() => applyBulk("prefix")}>Renommer</button></div>
+                <span><ArrowUpDown /><b>{t("preview.bulkEdit")}</b><small>{t("preview.bulkEditHint", { count: selectedCount })}</small></span>
+                <div><select value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)}><option value="">{t("preview.bulkCategoryPlaceholder")}</option>{[...DEFAULT_CATEGORIES, ...cats].map((category) => <option key={category.id}>{category.name}</option>)}</select><button onClick={() => applyBulk("category")}>{t("preview.apply")}</button></div>
+                <div><input placeholder={t("preview.moveToFolderPlaceholder")} value={bulkFolder} onChange={(e) => setBulkFolder(e.target.value)} /><button onClick={() => applyBulk("folder")}>{t("preview.move")}</button></div>
+                <div><input placeholder={t("preview.renamePrefixPlaceholder")} value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} /><button onClick={() => applyBulk("prefix")}>{t("preview.rename")}</button></div>
               </div>
             )}
             {error && (
@@ -1054,64 +1055,64 @@ export default function Home() {
               <div className="pathwarning">
                 <Info />
                 <div>
-                  <b>Doublon possible</b>
+                  <b>{t("preview.duplicateWarningTitle")}</b>
                   <small>{nameWarning}</small>
                 </div>
-                <button title="Fermer" onClick={() => setNameWarning("")} style={{ marginLeft: "auto", border: 0, background: "none", color: "inherit", fontSize: 16, cursor: "pointer" }}>×</button>
+                <button title={t("preview.closeWarning")} onClick={() => setNameWarning("")} style={{ marginLeft: "auto", border: 0, background: "none", color: "inherit", fontSize: 16, cursor: "pointer" }}>×</button>
               </div>
             )}
             {archiveReports.length > 0 && (
-              <div className="archivereports"><header><b>{archiveReports.length} archive(s) reçue(s)</b><small>{archiveReports.reduce((sum, report) => sum + report.count, 0)} fichier(s) détecté(s) au total</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>Dossier de sortie : {report.root}</small></span><strong>{report.status === "ok" ? `${report.count} fichiers` : report.message || "Archive vide"}</strong><button title="Retirer cette archive" onClick={() => removeSource(report.root)}><Trash2 /></button></div>)}</div>
+              <div className="archivereports"><header><b>{t("preview.archivesReceived", { count: archiveReports.length })}</b><small>{t("preview.filesDetectedTotal", { count: archiveReports.reduce((sum, report) => sum + report.count, 0) })}</small></header>{archiveReports.map((report) => <div className={report.status} key={report.id}><FileArchive /><span><b>{report.name}</b><small>{t("preview.outputFolder", { root: report.root })}</small></span><strong>{report.status === "ok" ? t("preview.filesCount", { count: report.count }) : report.message || t("preview.emptyArchive")}</strong><button title={t("preview.removeArchive")} onClick={() => removeSource(report.root)}><Trash2 /></button></div>)}</div>
             )}
             {mode === "extract" && longPathCandidates > 0 && pathDecision === "ask" && (
-              <div className="pathdecision"><Info /><div><b>{longPathCandidates} chemin(s) potentiellement trop long(s)</b><small>ArchiveFlow ne renomme jamais un fichier. Vous choisissez si les noms de dossiers peuvent être raccourcis.</small><span><button onClick={() => setPathDecision("shorten")}>Raccourcir les dossiers (fichiers inchangés)</button><button onClick={() => setPathDecision("preserve")}>Conserver tous les noms originaux</button><button onClick={() => reset()}>Annuler</button></span></div></div>
+              <div className="pathdecision"><Info /><div><b>{t("preview.longPathsTitle", { count: longPathCandidates })}</b><small>{t("preview.longPathsHint")}</small><span><button onClick={() => setPathDecision("shorten")}>{t("preview.shortenFolders")}</button><button onClick={() => setPathDecision("preserve")}>{t("preview.keepOriginalNames")}</button><button onClick={() => reset()}>{t("sources.cancel")}</button></span></div></div>
             )}
             {mode === "extract" && longPathCandidates > 0 && pathDecision === "preserve" && (
-              <div className="pathwarning"><ShieldCheck /><div><b>Noms originaux conservés</b><small>Choisissez une destination courte, par exemple C:\\SIG, afin d’éviter l’erreur Windows.</small></div></div>
+              <div className="pathwarning"><ShieldCheck /><div><b>{t("preview.originalNamesKeptTitle")}</b><small>{t("preview.originalNamesKeptHint")}</small></div></div>
             )}
             {mode === "extract" && longPathCandidates > 0 && pathDecision === "shorten" && (
-              <div className="pathwarning"><ShieldCheck /><div><b>Dossiers raccourcis, fichiers inchangés</b><small>Seuls les noms de dossiers sont raccourcis ; aucun fichier n’est renommé. Vérifiez les liens internes si un projet SIG est concerné.</small></div></div>
+              <div className="pathwarning"><ShieldCheck /><div><b>{t("preview.foldersShortenedTitle")}</b><small>{t("preview.foldersShortenedHint")}</small></div></div>
             )}
             {destination && planned.length > 0 && (
               <div className={destinationAnalysis?.spaceStatus.kind === "low" ? "destinationcheck low" : "destinationcheck"}>
                 <HardDrive />
                 <div>
-                  <b>{destinationBusy ? "Analyse de la destination…" : `Destination vérifiée : ${destination.name}`}</b>
+                  <b>{destinationBusy ? t("preview.destinationAnalyzing") : t("preview.destinationVerified", { name: destination.name })}</b>
                   <small>
                     {destinationAnalysis
-                      ? `${destinationAnalysis.conflicts.length} signalement(s) • ${formatBytes(destinationAnalysis.requiredBytes)} requis • ${spaceStatusText(destinationAnalysis.spaceStatus)}`
-                      : "L’analyse sera effectuée avant toute écriture."}
+                      ? t("preview.destinationReports", { count: destinationAnalysis.conflicts.length, size: formatBytes(destinationAnalysis.requiredBytes), space: spaceStatusText(destinationAnalysis.spaceStatus, t) })
+                      : t("preview.destinationPending")}
                   </small>
                 </div>
               </div>
             )}
             {shortenedPaths > 0 && (
-              <div className="pathwarning"><ShieldCheck /><div><b>{shortenedPaths} chemin(s) trop long(s) corrigé(s)</b><small>Les noms sont raccourcis de façon stable, les extensions et les familles de fichiers restent cohérentes.</small></div></div>
+              <div className="pathwarning"><ShieldCheck /><div><b>{t("preview.pathsFixedTitle", { count: shortenedPaths })}</b><small>{t("preview.pathsFixedHint")}</small></div></div>
             )}
             {protectedFiles > 0 && (
-              <div className="integritynotice"><ShieldCheck /><div><b>Projet SIG protégé : {protectedFiles} élément(s)</b><small>Les noms internes sont conservés pour ne pas casser les liens des couches QGIS/ArcGIS.{unsafeProtectedPaths ? ` ${unsafeProtectedPaths} chemin(s) reste(nt) long(s) : choisissez un dossier de destination proche de la racine, par exemple C:\\SIG.` : ""}</small></div></div>
+              <div className="integritynotice"><ShieldCheck /><div><b>{t("preview.sigProtectedTitle", { count: protectedFiles })}</b><small>{t("preview.sigProtectedHint")}{unsafeProtectedPaths ? t("preview.sigProtectedPathsRemain", { count: unsafeProtectedPaths }) : ""}</small></div></div>
             )}
             {quarantinedCount > 0 && (
-              <div className="v2error"><Info /><div><b>{quarantinedCount} élément(s) mis en quarantaine</b><small> — ratio de compression anormal (signature de bombe zip). Ils sont exclus par défaut ; ouvrez la fiche de chaque fichier pour les inclure quand même si vous êtes certain de leur origine.</small></div></div>
+              <div className="v2error"><Info /><div><b>{t("preview.quarantinedTitle", { count: quarantinedCount })}</b><small>{t("preview.quarantinedHint")}</small></div></div>
             )}
             {lastReport && (
-              <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? "Enregistrement complet" : "Enregistrement incomplet"}</b><small>{lastReport.detected} détecté(s) • {lastReport.selected} sélectionné(s) • {lastReport.saved} enregistré(s) • {lastReport.skipped} non enregistré(s)</small></div></div>
+              <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? t("preview.saveCompleteTitle") : t("preview.saveIncompleteTitle")}</b><small>{t("preview.saveReportSummary", { detected: lastReport.detected, selected: lastReport.selected, saved: lastReport.saved, skipped: lastReport.skipped })}</small></div></div>
             )}
             {busy ? (
               <div className="v2empty">
                 <RefreshCcw className="spin" />
-                <b>Analyse en cours…</b>
+                <b>{t("preview.analyzing")}</b>
                 {analyzeProgress && analyzeProgress.total > 0 && (
-                  <p>{Math.round((analyzeProgress.done / analyzeProgress.total) * 100)}% ({analyzeProgress.done}/{analyzeProgress.total})</p>
+                  <p>{t("preview.analyzeProgressPercent", { percent: Math.round((analyzeProgress.done / analyzeProgress.total) * 100), done: analyzeProgress.done, total: analyzeProgress.total })}</p>
                 )}
                 {analyzeProgress && analyzeProgress.total === 0 && analyzeProgress.done > 0 && (
-                  <p>{analyzeProgress.done} fichier(s) analysé(s)</p>
+                  <p>{t("preview.analyzeProgressCount", { count: analyzeProgress.done })}</p>
                 )}
               </div>
             ) : !planned.length ? (
               <div className="v2empty">
                 <FolderTree />
-                <b>Aucun fichier à prévisualiser</b>
+                <b>{t("preview.nothingToPreview")}</b>
               </div>
             ) : view === "tree" ? (
               <div className="tree">
@@ -1120,7 +1121,7 @@ export default function Home() {
                     <h3>
                       <input
                         type="checkbox"
-                        aria-label={`Inclure le dossier ${f || "Racine"}`}
+                        aria-label={t("preview.includeFolder", { name: f || t("preview.root") })}
                         checked={planned.filter((entry) => {
                           const path = entry.planned || entry.name;
                           return f ? path.startsWith(`${f}/`) : !path.includes("/");
@@ -1128,11 +1129,11 @@ export default function Home() {
                         onChange={() => toggleFolder(f)}
                       />
                       <FolderOpen />
-                      {f ? f.replaceAll("/", " / ") : "Racine"}
+                      {f ? f.replaceAll("/", " / ") : t("preview.root")}
                       <span>{is.length}</span>
                     </h3>
                     {is.map((e, i) => (
-                      <EntryRow e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} />
+                      <EntryRow e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} t={t} />
                     ))}
                   </div>
                 ))}
@@ -1140,7 +1141,7 @@ export default function Home() {
             ) : (
               <div className="tree listview">
                 {filtered.map((e, i) => (
-                  <EntryRow e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} />
+                  <EntryRow e={e} excluded={excluded.has(entryKey(e))} toggle={() => toggleEntry(e)} key={i} t={t} />
                 ))}
               </div>
             )}
@@ -1148,13 +1149,13 @@ export default function Home() {
               <div>
                 <span>
                   <CheckCircle2 />
-                  Simulation terminée
+                  {t("preview.simulationDone")}
                 </span>
-                <small>Aucun écrasement silencieux.</small>
+                <small>{t("preview.noSilentOverwrite")}</small>
               </div>
               {mode === "create" && destination && (
                 <label className="renamebeforesave">
-                  Nom du fichier <small>(facultatif)</small>
+                  {t("preview.fileNameOptional")} <small>{t("preview.optional")}</small>
                   <input value={name} onChange={(e) => setName(e.target.value)} placeholder="archive-organisee" />
                 </label>
               )}
@@ -1163,9 +1164,9 @@ export default function Home() {
                 disabled={!selectedCount || busy}
                 onClick={() => (destination ? produce(true) : chooseDestination(false))}
               >
-                {destination ? "Enregistrer dans ce dossier" : "Choisir un dossier"}
+                {destination ? t("preview.saveToFolder") : t("preview.chooseFolder")}
               </button>
-              {busy && progress && <button className="cancelbtn" onClick={() => abortRef.current?.abort()}><XCircle />Annuler</button>}
+              {busy && progress && <button className="cancelbtn" onClick={() => abortRef.current?.abort()}><XCircle />{t("preview.cancelOperation")}</button>}
               {mode === "create" && (
                 <button
                   className="downloadbtn"
@@ -1173,7 +1174,7 @@ export default function Home() {
                   onClick={() => produce()}
                 >
                   <Download />
-                  Télécharger
+                  {t("preview.download")}
                 </button>
               )}
             </div>
@@ -1189,9 +1190,11 @@ export default function Home() {
             setHistory([]);
             localStorage.removeItem("archiveflow-history");
           }}
+          locale={locale}
+          t={t}
         />
       )}
-      {formatsOpen && <FormatMatrixModal onClose={() => setFormatsOpen(false)} />}
+      {formatsOpen && <FormatMatrixModal onClose={() => setFormatsOpen(false)} t={t} />}
       {settings && (
         <SettingsModal
           close={() => setSettings(false)}
@@ -1212,6 +1215,7 @@ export default function Home() {
           jsonInput={jsonInput}
           security={security}
           setSecurity={setSecurity}
+          t={t}
         />
       )}
     </main>

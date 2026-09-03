@@ -1,3 +1,5 @@
+import { Locale, translate } from "./i18n";
+export class SecurityError extends Error {}
 export type ArchiveEntry = {
   name: string;
   size: number;
@@ -25,16 +27,17 @@ export const DEFAULT_SECURITY_LIMITS: SecurityLimits = {
   maxRatio: 200,
   maxDepth: 20,
 };
-function securityError(detail: string) {
-  throw Error(`Archive bloquée par sécurité : ${detail}. Modifiez les limites avancées seulement si vous faites confiance à cette archive.`);
+function securityError(detail: string, locale: Locale): never {
+  throw new SecurityError(translate(locale, "error.securityBlocked", { detail }));
 }
-function checkSecurity(name: string, count: number, total: number, compressed: number, limits: SecurityLimits) {
+function checkSecurity(name: string, count: number, total: number, compressed: number, limits: SecurityLimits, locale: Locale) {
   const depth = safe(name).split("/").filter(Boolean).length;
-  if (count > limits.maxFiles) securityError(`plus de ${limits.maxFiles.toLocaleString("fr-FR")} fichiers`);
-  if (total > limits.maxExpandedBytes) securityError(`taille extraite supérieure à ${formatBytes(limits.maxExpandedBytes)}`);
-  if (depth > limits.maxDepth) securityError(`profondeur supérieure à ${limits.maxDepth} dossiers`);
+  const numberLocale = locale === "en" ? "en-US" : "fr-FR";
+  if (count > limits.maxFiles) securityError(translate(locale, "error.tooManyFiles", { count: limits.maxFiles.toLocaleString(numberLocale) }), locale);
+  if (total > limits.maxExpandedBytes) securityError(translate(locale, "error.extractedSizeExceeds", { size: formatBytes(limits.maxExpandedBytes) }), locale);
+  if (depth > limits.maxDepth) securityError(translate(locale, "error.depthExceeds", { depth: limits.maxDepth }), locale);
   const ratio = compressed > 0 ? total / compressed : total > 0 ? Infinity : 0;
-  if (ratio > limits.maxRatio) securityError(`ratio de compression ${Math.round(ratio)}:1 supérieur à ${limits.maxRatio}:1`);
+  if (ratio > limits.maxRatio) securityError(translate(locale, "error.ratioExceeds", { ratio: Math.round(ratio), limit: limits.maxRatio }), locale);
 }
 const u16 = (v: DataView, o: number) => v.getUint16(o, true),
   u32 = (v: DataView, o: number) => v.getUint32(o, true);
@@ -132,7 +135,7 @@ export type MultiPartGroup =
 // The spanned-ZIP and RAR-multi-volume formats need real container-aware
 // reconstruction, not just concatenation - flagged as unsupported here rather
 // than silently producing a corrupt result.
-export function detectMultiPart(files: File[]): { groups: MultiPartGroup[]; rest: File[] } {
+export function detectMultiPart(files: File[], locale: Locale = "fr"): { groups: MultiPartGroup[]; rest: File[] } {
   const lower = (s: string) => s.toLowerCase();
   const used = new Set<number>();
   const groups: MultiPartGroup[] = [];
@@ -144,7 +147,7 @@ export function detectMultiPart(files: File[]): { groups: MultiPartGroup[]; rest
   });
   for (const idxs of rarGroups.values()) {
     if (idxs.length < 2) continue;
-    groups.push({ kind: "unsupported", reason: "Volumes RAR multi-parties (.partN.rar) : reconstituez l’archive avec WinRAR ou 7-Zip avant de l’importer ici.", files: idxs.map((i) => files[i]) });
+    groups.push({ kind: "unsupported", reason: translate(locale, "error.rarMultiVolume"), files: idxs.map((i) => files[i]) });
     idxs.forEach((i) => used.add(i));
   }
 
@@ -157,7 +160,7 @@ export function detectMultiPart(files: File[]): { groups: MultiPartGroup[]; rest
   for (const [base, idxs] of zGroups) {
     const zipIndex = files.findIndex((f, i) => !used.has(i) && lower(f.name) === `${base}.zip`);
     const all = zipIndex >= 0 ? [...idxs, zipIndex] : idxs;
-    groups.push({ kind: "unsupported", reason: "Volumes ZIP fractionnés (.zNN + .zip) : reconstituez l’archive avec 7-Zip ou WinRAR avant de l’importer ici.", files: all.map((i) => files[i]) });
+    groups.push({ kind: "unsupported", reason: translate(locale, "error.zipSpanned"), files: all.map((i) => files[i]) });
     all.forEach((i) => used.add(i));
   }
 
@@ -227,7 +230,7 @@ async function compress(data: Uint8Array, format: "gzip" | "deflate-raw") {
     .pipeThrough(new CompressionStream(format));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS) {
+export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS, locale: Locale = "fr") {
   const b = new Uint8Array(await file.arrayBuffer()),
     v = new DataView(b.buffer);
   let end = -1;
@@ -236,15 +239,15 @@ export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECUR
       end = i;
       break;
     }
-  if (end < 0) throw Error("ZIP invalide ou incomplet.");
+  if (end < 0) throw Error(translate(locale, "error.invalidZip"));
   let cur = u32(v, end + 16);
   const out: ArchiveEntry[] = [],
     dec = new TextDecoder();
   const entryCount = u16(v, end + 10);
-  if (entryCount > limits.maxFiles) securityError(`plus de ${limits.maxFiles.toLocaleString("fr-FR")} fichiers`);
+  if (entryCount > limits.maxFiles) securityError(translate(locale, "error.tooManyFiles", { count: limits.maxFiles.toLocaleString(locale === "en" ? "en-US" : "fr-FR") }), locale);
   let expandedTotal = 0, compressedTotal = 0;
   for (let i = 0; i < entryCount; i++) {
-    if (u32(v, cur) !== 0x02014b50) throw Error("Structure ZIP non reconnue.");
+    if (u32(v, cur) !== 0x02014b50) throw Error(translate(locale, "error.unrecognizedZipStructure"));
     const method = u16(v, cur + 10),
       cs = u32(v, cur + 20),
       size = u32(v, cur + 24),
@@ -267,7 +270,7 @@ export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECUR
     if (!suspicious) {
       expandedTotal += size;
       compressedTotal += cs;
-      checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits);
+      checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits, locale);
     }
     if (!isDirectory) {
       if (suspicious) {
@@ -277,11 +280,11 @@ export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECUR
           data: new Uint8Array(),
           source: file.name,
           quarantined: true,
-          quarantineReason: `ratio de compression ${Math.round(entryRatio)}:1 supérieur à ${limits.maxRatio}:1`,
+          quarantineReason: translate(locale, "error.ratioExceeds", { ratio: Math.round(entryRatio), limit: limits.maxRatio }),
         });
       } else {
         if (method !== 0 && method !== 8)
-          throw Error(`Compression ZIP non prise en charge : ${name}`);
+          throw Error(translate(locale, "error.unsupportedZipCompression", { name }));
         out.push({
           name,
           size,
@@ -324,19 +327,17 @@ export function readTarBytes(bytes: Uint8Array, source: string) {
   }
   return out;
 }
-async function readWithLibarchive(file: File, limits: SecurityLimits): Promise<ArchiveEntry[]> {
+async function readWithLibarchive(file: File, limits: SecurityLimits, locale: Locale): Promise<ArchiveEntry[]> {
   const { Archive } = await import("libarchive.js");
   Archive.init({
     workerUrl: `${import.meta.env.BASE_URL}libarchive/worker-bundle.js`,
   });
   const archive = await Archive.open(file);
   if (await archive.hasEncryptedData()) {
-    const password = window.prompt(
-      `L’archive ${file.name} est protégée. Saisissez son mot de passe :`,
-    );
+    const password = window.prompt(translate(locale, "prompt.archivePassword", { name: file.name }));
     if (!password) {
       await archive.close();
-      throw Error("Extraction annulée : mot de passe requis.");
+      throw Error(translate(locale, "error.passwordRequired"));
     }
     await archive.usePassword(password);
   }
@@ -348,7 +349,7 @@ async function readWithLibarchive(file: File, limits: SecurityLimits): Promise<A
     if (!(item.file instanceof File)) continue;
     const name = safe(`${item.path || ""}${item.file.name}`);
     total += item.file.size;
-    checkSecurity(name, out.length + 1, total, file.size, limits);
+    checkSecurity(name, out.length + 1, total, file.size, limits, locale);
     out.push({
       name,
       size: item.file.size,
@@ -362,17 +363,17 @@ async function readWithLibarchive(file: File, limits: SecurityLimits): Promise<A
   await archive.close();
   return out;
 }
-export async function readArchive(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS) {
+export async function readArchive(file: File, limits: SecurityLimits = DEFAULT_SECURITY_LIMITS, locale: Locale = "fr") {
   const format = detectFormat(file),
     bytes = new Uint8Array(await file.arrayBuffer());
   if (format === "ZIP") {
     try {
-      const files = await readZip(file, limits);
+      const files = await readZip(file, limits, locale);
       if (files.length) return files;
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Archive bloquée par sécurité")) throw error;
+      if (error instanceof SecurityError) throw error;
     }
-    return readWithLibarchive(file, limits);
+    return readWithLibarchive(file, limits, locale);
   }
   if (format === "TAR") return readTarBytes(bytes, file.name);
   if (format === "TAR.GZ")
@@ -382,8 +383,8 @@ export async function readArchive(file: File, limits: SecurityLimits = DEFAULT_S
     const data = await decompress(bytes, "gzip");
     return [{ name, size: data.length, data, source: file.name }];
   }
-  if (format === "7Z" || format === "RAR") return readWithLibarchive(file, limits);
-  throw Error("Format non reconnu.");
+  if (format === "7Z" || format === "RAR") return readWithLibarchive(file, limits, locale);
+  throw Error(translate(locale, "error.unrecognizedFormat"));
 }
 function crc32(d: Uint8Array) {
   let c = 0xffffffff;

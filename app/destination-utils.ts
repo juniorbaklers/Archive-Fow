@@ -1,5 +1,6 @@
 import { ArchiveEntry } from "./archive-utils";
 import { CollisionPolicy } from "./smart-engine";
+import { Locale, translate } from "./i18n";
 
 export type DestinationConflictKind = "file-vs-folder" | "folder-vs-file" | "same-path-same-content" | "same-path-different-content" | "same-content-other-path";
 export type DestinationConflict = { entryPath: string; existingPath: string; kind: DestinationConflictKind };
@@ -44,9 +45,9 @@ async function scanFiles(dir: FileSystemDirectoryHandle, prefix = "", out: { pat
   }
   return out;
 }
-export async function pickDestination() {
+export async function pickDestination(locale: Locale = "fr") {
   const picker = (window as any).showDirectoryPicker as undefined | (() => Promise<FileSystemDirectoryHandle>);
-  if (!picker) throw Error("La sélection d’un dossier nécessite Chrome ou Edge sur ordinateur.");
+  if (!picker) throw Error(translate(locale, "error.directoryPickerUnavailable"));
   return picker();
 }
 export async function analyzeDestination(root: FileSystemDirectoryHandle, entries: ArchiveEntry[]): Promise<DestinationAnalysis> {
@@ -83,10 +84,10 @@ async function uniqueFileName(dir: FileSystemDirectoryHandle, name: string) {
   for (let index = 2; await existingKind(dir, candidate); index++) candidate = `${stem} (${index})${extension}`;
   return candidate;
 }
-export async function writeToDestination(root: FileSystemDirectoryHandle, entries: ArchiveEntry[], policy: CollisionPolicy, signal: AbortSignal, onProgress: (written: number, skipped: number, current: string) => void) {
+export async function writeToDestination(root: FileSystemDirectoryHandle, entries: ArchiveEntry[], policy: CollisionPolicy, signal: AbortSignal, onProgress: (written: number, skipped: number, current: string) => void, locale: Locale = "fr") {
   let written = 0, skipped = 0;
   for (const entry of entries) {
-    if (signal.aborted) throw new DOMException("Opération annulée", "AbortError");
+    if (signal.aborted) throw new DOMException(translate(locale, "error.operationCancelled"), "AbortError");
     const parts = clean(entry.planned || entry.name); let dir = root, impossible = false;
     for (const part of parts.slice(0, -1)) {
       const found = await existingKind(dir, part);

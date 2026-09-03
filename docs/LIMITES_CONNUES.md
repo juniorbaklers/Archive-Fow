@@ -18,7 +18,8 @@ Ce document liste, honnêtement, ce qu'ArchiveFlow ne fait pas (encore), pour é
 
 ## Internationalisation
 
-- Un système de traduction FR/EN existe (`app/i18n.ts`) et couvre : la navigation, l'écran d'accueil, l'en-tête de l'espace de travail. Le reste de l'interface (éditeur de règles, paramètres avancés, détails des entrées, messages d'erreur et d'avertissement) reste en français uniquement. Étendre la couverture nécessite d'ajouter les clés manquantes au dictionnaire et de remplacer les chaînes câblées dans les composants concernés.
+- Le système de traduction FR/EN (`app/i18n.ts`) couvre l'ensemble de l'interface utilisateur : navigation, écran d'accueil, espace de travail (les trois étapes, la simulation, les bannières d'état et d'erreur), panneau d'historique (y compris les exports CSV/HTML), matrice des formats, et les paramètres (règles, renommage, doublons, sécurité, catégories). Les messages d'erreur techniques générés par le moteur d'archives (`archive-utils.ts`, `destination-utils.ts`) sont également traduits.
+- Restent volontairement en français dans les deux langues, car ce sont des identifiants internes plutôt que du texte d'interface : les noms de catégories de classement (`DEFAULT_CATEGORIES`, ex. « Bureautique », « Audio et vidéo ») utilisés comme clés de correspondance et comme noms de dossiers de sortie réels — les traduire changerait le comportement du classement et casserait la compatibilité avec les règles déjà enregistrées.
 
 ## Estimation avant traitement
 
@@ -29,6 +30,10 @@ Ce document liste, honnêtement, ce qu'ArchiveFlow ne fait pas (encore), pour é
 
 - Aucune analyse antivirus ou détection de contenu malveillant dans les fichiers extraits.
 - Les limites de sécurité (nombre de fichiers, taille, ratio, profondeur) sont configurables par l'utilisateur et peuvent donc être assouplies volontairement.
+
+## Qualité du code (React Compiler / ESLint)
+
+- Le linter (React Compiler expérimental via `eslint-plugin-react-hooks`) signale dans `app/page.tsx` et `components/archive/SettingsModal.tsx` des faux positifs de type « Compilation Skipped » / « Cannot access ref value during render », déclenchés par l'analyse statique du compilateur sur des motifs qui ne posent aucun problème à l'exécution (confirmé par la suite de tests complète, y compris les tests navigateur réel, et par le build de production). Ce sont des limitations connues, documentées ici plutôt que masquées, et sans impact fonctionnel.
 
 ## Compatibilité navigateur
 
