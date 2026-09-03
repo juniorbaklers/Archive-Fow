@@ -227,6 +227,13 @@
 .themetoggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid #263349; border-radius: var(--r-full); background: none; color: #cbd5e1; }
 .themetoggle:hover { color: #f8fafc; border-color: #475569; }
 .themetoggle svg { width: 15px; }
+.localeswitch { display: flex; align-items: center; border: 1px solid #263349; border-radius: var(--r-full); padding: 2px; gap: 2px; }
+.localeswitch button {
+  border: 0; background: none; color: #94a3b8; font-size: 10px; font-weight: 800; letter-spacing: 0.5px;
+  padding: 4px 9px; border-radius: var(--r-full); transition: background 0.15s, color 0.15s;
+}
+.localeswitch button:hover { color: #e2e8f0; }
+.localeswitch button.on { background: var(--brand-600); color: #f8fafc; }
 
 /* -- Workspace header ------------------------------------------------------ */
 .v2wrap { max-width: 1320px; margin: auto; padding: 36px 24px; }

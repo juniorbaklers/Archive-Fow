@@ -1,16 +1,19 @@
 import { Archive, ArchiveRestore, FolderOpen, History, ShieldCheck, Sparkles } from "lucide-react";
 import { HistoryEntry } from "./HistoryPanel";
+import { TranslationKey } from "@/app/i18n";
 
 export function HomeScreen({
   history,
   profiles,
   onStart,
   onSelectProfile,
+  t,
 }: {
   history: HistoryEntry[];
   profiles: { id: string; name: string; description: string }[];
   onStart: (mode: "extract" | "create") => void;
   onSelectProfile: (id: string) => void;
+  t: (key: TranslationKey) => string;
 }) {
   const recent = history.slice(0, 5);
   return (
@@ -18,10 +21,10 @@ export function HomeScreen({
       <div className="homehero">
         <em>
           <Sparkles />
-          GESTIONNAIRE D’ARCHIVES LOCAL
+          {t("home.eyebrow").toUpperCase()}
         </em>
-        <h1>Que voulez-vous faire ?</h1>
-        <p>Extrayez et organisez une archive existante, ou créez-en une nouvelle. Tout se passe dans votre navigateur, sans transfert de fichiers.</p>
+        <h1>{t("home.title")}</h1>
+        <p>{t("home.subtitle")}</p>
       </div>
       <div className="homeactions">
         <button className="homeaction" onClick={() => onStart("extract")}>
@@ -29,8 +32,8 @@ export function HomeScreen({
             <FolderOpen />
           </i>
           <div>
-            <b>Extraire &amp; organiser</b>
-            <small>Ouvrez une ou plusieurs archives, classez et renommez leur contenu, puis enregistrez-le.</small>
+            <b>{t("home.extract.title")}</b>
+            <small>{t("home.extract.desc")}</small>
           </div>
         </button>
         <button className="homeaction" onClick={() => onStart("create")}>
@@ -38,8 +41,8 @@ export function HomeScreen({
             <Archive />
           </i>
           <div>
-            <b>Créer une archive</b>
-            <small>Rassemblez des fichiers et des dossiers dans une nouvelle archive ZIP, TAR ou GZIP.</small>
+            <b>{t("home.create.title")}</b>
+            <small>{t("home.create.desc")}</small>
           </div>
         </button>
       </div>
@@ -47,7 +50,7 @@ export function HomeScreen({
         <div className="homepanel">
           <h2>
             <History />
-            Opérations récentes
+            {t("home.recent")}
           </h2>
           {recent.length ? (
             <ul>
@@ -63,13 +66,13 @@ export function HomeScreen({
               ))}
             </ul>
           ) : (
-            <p className="homeempty">Aucune opération pour l’instant.</p>
+            <p className="homeempty">{t("home.recentEmpty")}</p>
           )}
         </div>
         <div className="homepanel">
           <h2>
             <ArchiveRestore />
-            Profils métiers enregistrés
+            {t("home.profiles")}
           </h2>
           <ul className="homeprofiles">
             {profiles.map((p) => (
@@ -85,7 +88,7 @@ export function HomeScreen({
       </div>
       <p className="homefooter">
         <ShieldCheck />
-        Traitement 100&nbsp;% local : vos fichiers ne quittent jamais votre appareil.
+        {t("home.footer")}
       </p>
     </section>
   );

@@ -1,4 +1,5 @@
 import { Archive, History, Home, Moon, Settings2, ShieldCheck, Sun } from "lucide-react";
+import { LOCALES, Locale, TranslationKey } from "@/app/i18n";
 
 export function TopBar({
   onOpenHistory,
@@ -8,6 +9,9 @@ export function TopBar({
   screen,
   onNavigateHome,
   onNavigateWorkspace,
+  locale,
+  onChangeLocale,
+  t,
 }: {
   onOpenHistory: () => void;
   onOpenSettings: () => void;
@@ -16,6 +20,9 @@ export function TopBar({
   screen: "home" | "workspace";
   onNavigateHome: () => void;
   onNavigateWorkspace: () => void;
+  locale: Locale;
+  onChangeLocale: (locale: Locale) => void;
+  t: (key: TranslationKey) => string;
 }) {
   return (
     <header className="v2bar">
@@ -25,33 +32,40 @@ export function TopBar({
         </i>
         <span>
           Archive<b>Flow</b>
-          <small>MANAGER</small>
+          <small>{t("brand.tagline")}</small>
         </span>
       </a>
       <nav>
         <button className={screen === "home" ? "on" : ""} onClick={onNavigateHome}>
           <Home />
-          Accueil
+          {t("nav.home")}
         </button>
         <button className={screen === "workspace" ? "on" : ""} onClick={onNavigateWorkspace}>
-          Espace de travail
+          {t("nav.workspace")}
         </button>
         <button onClick={onOpenHistory}>
           <History />
-          Historique
+          {t("nav.history")}
         </button>
         <button onClick={onOpenSettings}>
           <Settings2 />
-          Paramètres
+          {t("nav.settings")}
         </button>
       </nav>
       <div className="v2barright">
+        <div className="localeswitch">
+          {LOCALES.map((l) => (
+            <button key={l.id} className={locale === l.id ? "on" : ""} onClick={() => onChangeLocale(l.id)}>
+              {l.label}
+            </button>
+          ))}
+        </div>
         <button className="themetoggle" onClick={onToggleTheme} title={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}>
           {theme === "dark" ? <Sun /> : <Moon />}
         </button>
         <strong>
           <ShieldCheck />
-          Traitement local
+          {t("brand.localProcessing")}
         </strong>
       </div>
     </header>

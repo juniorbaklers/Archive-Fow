@@ -55,6 +55,7 @@ import { FormatMatrixModal } from "@/components/archive/FormatMatrixModal";
 import { HistoryPanel, HistoryEntry } from "@/components/archive/HistoryPanel";
 import { HomeScreen } from "@/components/archive/HomeScreen";
 import { SettingsModal, SettingsTab } from "@/components/archive/SettingsModal";
+import { Locale, translate } from "./i18n";
 type Mode = "extract" | "create";
 const DEF: RenameOptions = {
   pattern: "{nom}_{numero}",
@@ -135,6 +136,7 @@ export default function Home() {
     [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
     [nameWarning, setNameWarning] = useState(""),
     [theme, setTheme] = useState<"light" | "dark">("light"),
+    [locale, setLocale] = useState<Locale>("fr"),
     [screen, setScreen] = useState<"home" | "workspace">("home"),
     [maxArchiveSizeMb, setMaxArchiveSizeMb] = useState(""),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
@@ -182,6 +184,8 @@ export default function Home() {
       const storedTheme = localStorage.getItem("archiveflow-theme");
       if (storedTheme === "dark" || storedTheme === "light") setTheme(storedTheme);
       else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) setTheme("dark");
+      const storedLocale = localStorage.getItem("archiveflow-locale");
+      if (storedLocale === "fr" || storedLocale === "en") setLocale(storedLocale);
     } catch {}
   }, []);
   useEffect(
@@ -204,6 +208,10 @@ export default function Home() {
   useEffect(() => {
     try { localStorage.setItem("archiveflow-theme", theme); } catch {}
   }, [theme]);
+  useEffect(() => {
+    try { localStorage.setItem("archiveflow-locale", locale); } catch {}
+  }, [locale]);
+  const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
   const effectivePolicy: CollisionPolicy = preserveAll && policy === "skip" ? "keep-both" : policy;
   const basePlanned = useMemo(
       () =>
@@ -708,13 +716,17 @@ export default function Home() {
         onOpenHistory={() => setHistoryOpen(true)}
         onOpenSettings={() => setSettings(true)}
         theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        onToggleTheme={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
         screen={screen}
         onNavigateHome={() => setScreen("home")}
         onNavigateWorkspace={() => setScreen("workspace")}
+        locale={locale}
+        onChangeLocale={setLocale}
+        t={t}
       />
       {screen === "home" && (
         <HomeScreen
+          t={t}
           history={history}
           profiles={PROFILES.filter((p) => p.id !== "custom")}
           onStart={(startMode) => { setMode(startMode); setScreen("workspace"); }}
@@ -725,12 +737,9 @@ export default function Home() {
       <section className="v2wrap">
         <div className="v2title">
           <div>
-            <em>ESPACE DE TRAVAIL</em>
-            <h1>Organisez vos archives en toute confiance.</h1>
-            <p>
-              Classement intelligent, renommage, familles et collisions
-              sécurisées.
-            </p>
+            <em>{t("workspace.eyebrow").toUpperCase()}</em>
+            <h1>{t("workspace.title")}</h1>
+            <p>{t("workspace.subtitle")}</p>
           </div>
           <button className="formats" onClick={() => setFormatsOpen(true)} title="Voir la matrice complète des formats">
             <span>
@@ -751,14 +760,14 @@ export default function Home() {
             onClick={() => reset("extract")}
           >
             <FolderOpen />
-            Extraire & organiser
+            {t("mode.extract")}
           </button>
           <button
             className={mode === "create" ? "on" : ""}
             onClick={() => reset("create")}
           >
             <FileArchive />
-            Créer une archive
+            {t("mode.create")}
           </button>
         </div>
         <div className="dashboard">
