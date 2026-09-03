@@ -1,19 +1,25 @@
-import { Archive, History, Moon, Settings2, ShieldCheck, Sun } from "lucide-react";
+import { Archive, History, Home, Moon, Settings2, ShieldCheck, Sun } from "lucide-react";
 
 export function TopBar({
   onOpenHistory,
   onOpenSettings,
   theme,
   onToggleTheme,
+  screen,
+  onNavigateHome,
+  onNavigateWorkspace,
 }: {
   onOpenHistory: () => void;
   onOpenSettings: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  screen: "home" | "workspace";
+  onNavigateHome: () => void;
+  onNavigateWorkspace: () => void;
 }) {
   return (
     <header className="v2bar">
-      <a className="v2brand">
+      <a className="v2brand" onClick={onNavigateHome}>
         <i>
           <Archive />
         </i>
@@ -23,7 +29,13 @@ export function TopBar({
         </span>
       </a>
       <nav>
-        <button className="on">Espace de travail</button>
+        <button className={screen === "home" ? "on" : ""} onClick={onNavigateHome}>
+          <Home />
+          Accueil
+        </button>
+        <button className={screen === "workspace" ? "on" : ""} onClick={onNavigateWorkspace}>
+          Espace de travail
+        </button>
         <button onClick={onOpenHistory}>
           <History />
           Historique

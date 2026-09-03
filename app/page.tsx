@@ -53,6 +53,7 @@ import { TopBar } from "@/components/archive/TopBar";
 import { EntryRow } from "@/components/archive/EntryRow";
 import { FormatMatrixModal } from "@/components/archive/FormatMatrixModal";
 import { HistoryPanel, HistoryEntry } from "@/components/archive/HistoryPanel";
+import { HomeScreen } from "@/components/archive/HomeScreen";
 import { SettingsModal, SettingsTab } from "@/components/archive/SettingsModal";
 type Mode = "extract" | "create";
 const DEF: RenameOptions = {
@@ -76,8 +77,8 @@ type FolderArchive = { file: File; path: string; included: boolean };
 type SaveReport = { detected: number; selected: number; saved: number; skipped: number; complete: boolean };
 type ArchiveReport = { id: string; name: string; root: string; count: number; status: "ok" | "empty" | "error"; message?: string };
 type PathDecision = "ask" | "shorten" | "preserve";
-type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
-const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string; policy?: CollisionPolicy; security?: Partial<SecurityLimits> }[] = [
+export type ProfileId = "custom" | "sig" | "documents" | "media" | "developer" | "cad" | "science";
+export const PROFILES: { id: ProfileId; name: string; category?: string; folder?: string; description: string; policy?: CollisionPolicy; security?: Partial<SecurityLimits> }[] = [
   { id: "custom", name: "Personnalisé", description: "Vos catégories et règles actuelles" },
   { id: "sig", name: "SIG", category: "SIG", folder: "SIG", description: "Shapefiles, GeoJSON, GPKG, QGIS et données géographiques", policy: "keep-both", security: { maxDepth: 30 } },
   { id: "documents", name: "Documents", category: "Bureautique", folder: "Documents", description: "Documents, PDF, tableurs et présentations", policy: "keep-both" },
@@ -134,6 +135,7 @@ export default function Home() {
     [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
     [nameWarning, setNameWarning] = useState(""),
     [theme, setTheme] = useState<"light" | "dark">("light"),
+    [screen, setScreen] = useState<"home" | "workspace">("home"),
     [maxArchiveSizeMb, setMaxArchiveSizeMb] = useState(""),
     [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState("name"),
@@ -707,7 +709,19 @@ export default function Home() {
         onOpenSettings={() => setSettings(true)}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        screen={screen}
+        onNavigateHome={() => setScreen("home")}
+        onNavigateWorkspace={() => setScreen("workspace")}
       />
+      {screen === "home" && (
+        <HomeScreen
+          history={history}
+          profiles={PROFILES.filter((p) => p.id !== "custom")}
+          onStart={(startMode) => { setMode(startMode); setScreen("workspace"); }}
+          onSelectProfile={(id) => { applyProfile(id as ProfileId); setScreen("workspace"); }}
+        />
+      )}
+      {screen === "workspace" && (
       <section className="v2wrap">
         <div className="v2title">
           <div>
@@ -1157,6 +1171,7 @@ export default function Home() {
           </section>
         </div>
       </section>
+      )}
       {historyOpen && (
         <HistoryPanel
           history={history}
