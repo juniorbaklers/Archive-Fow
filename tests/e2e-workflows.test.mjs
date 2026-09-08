@@ -213,6 +213,34 @@ test("cancelling a folder write stops it and reports the cancellation", { timeou
   await page.close();
 });
 
+test("saving a created archive to a folder writes the archive itself, not the loose source files", { timeout: 90000 }, async () => {
+  const { page, consoleErrors } = await openPage();
+  await page.addInitScript({ content: directoryPickerMockScript(0) });
+  await page.reload({ waitUntil: "networkidle" });
+
+  await page.locator(".homeaction", { hasText: "Créer une archive" }).click();
+  await page.locator('input[type="file"]').first().setInputFiles([
+    { name: "rapport.txt", mimeType: "text/plain", buffer: Buffer.from("bonjour ArchiveFlow") },
+    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("deuxieme fichier") },
+  ]);
+  await page.waitForTimeout(800);
+
+  await page.locator("button", { hasText: "Choisir le dossier maintenant" }).click();
+  await page.waitForTimeout(400);
+  await page.locator("button.folderbtn").click();
+  await page.waitForTimeout(800);
+
+  assert.deepEqual(await page.locator(".v2error").allInnerTexts(), []);
+  const savereport = await page.locator(".savereport").innerText();
+  assert.match(savereport, /Enregistrement complet/);
+
+  const written = await page.evaluate(() => [...window.__mockRoot.children.keys()]);
+  assert.deepEqual(written, ["archive-organisee.zip"], "the destination folder must contain the created ZIP, not the loose source files");
+
+  assert.deepEqual(consoleErrors, []);
+  await page.close();
+});
+
 test("shows a disk-space estimate once a destination is analyzed", { timeout: 90000 }, async () => {
   const { page, consoleErrors } = await openPage();
   await page.addInitScript({ content: directoryPickerMockScript(0) });

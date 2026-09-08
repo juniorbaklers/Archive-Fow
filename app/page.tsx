@@ -642,10 +642,51 @@ export default function Home() {
       )
         return;
       const u = selectedEntries;
+      async function buildArchive(archiveEntries: ArchiveEntry[], archiveFiles: ArchiveEntry[], baseName: string) {
+        if (output === "GZIP") {
+          if (archiveFiles.length !== 1) throw Error(t("msg.gzipSingleFileOnly"));
+          return { data: await makeGzip(archiveFiles[0]), filename: `${baseName}.gz`, mime: "application/gzip" };
+        }
+        if (output === "TAR") return { data: makeTar(archiveEntries), filename: `${baseName}.tar`, mime: "application/x-tar" };
+        if (output === "TAR.GZ") return { data: await makeTarGz(archiveEntries), filename: `${baseName}.tar.gz`, mime: "application/gzip" };
+        return { data: await makeZip(archiveEntries, zipCompression), filename: `${baseName}.zip`, mime: "application/zip" };
+      }
+      async function buildAllArchiveBuckets() {
+        const maxBytes = output !== "GZIP" ? Number(maxArchiveSizeMb) * 1024 * 1024 : 0;
+        const buckets = maxBytes > 0 ? bucketBySize(outputFiles, maxBytes) : [outputFiles];
+        const multi = buckets.length > 1;
+        if (multi) {
+          const oversized = buckets.filter((bucket) => bucket.length === 1 && bucket[0].size > maxBytes).length;
+          if (oversized) setError(t("msg.oversizedFilesInVolumes", { count: oversized }));
+        }
+        const directoryEntries = selectedEntries.filter((e) => e.directory);
+        const built: { data: Uint8Array; filename: string; mime: string }[] = [];
+        for (let i = 0; i < buckets.length; i++) {
+          const bucketFiles = buckets[i], baseName = multi ? `${name}_part${i + 1}` : name;
+          const archiveEntries = multi ? [...directoryEntries, ...bucketFiles] : u;
+          const one = await buildArchive(archiveEntries, bucketFiles, baseName);
+          const expectedBytes = bucketFiles.reduce((sum, e) => sum + e.size, 0);
+          const verified = output === "GZIP"
+            ? await verifyProduced(one.data, one.filename, one.mime, bucketFiles.length, expectedBytes)
+            : await verifyProduced(one.data, one.filename, one.mime, archiveEntries.length, expectedBytes);
+          if (!verified) throw Error(t("msg.integrityCheckFailedCreate", { filename: one.filename }));
+          built.push(one);
+        }
+        return { built, buckets, multi };
+      }
       if (folder) {
         const root = selected || destination;
         if (!root) { await chooseDestination(false); return; }
-        const analysis = await analyzeDestination(root, u);
+        // "Create" means the chosen folder must receive the archive itself
+        // (the .zip/.tar/...), not the loose source files - build it exactly
+        // like the download path does, then write the resulting archive
+        // file(s) into the destination instead of writing the raw entries.
+        const isCreate = mode === "create";
+        const archiveBuild = isCreate ? await buildAllArchiveBuckets() : null;
+        const writeEntries: ArchiveEntry[] = archiveBuild
+          ? archiveBuild.built.map((one) => ({ name: one.filename, planned: one.filename, size: one.data.length, data: one.data, source: "archive" }))
+          : u;
+        const analysis = await analyzeDestination(root, writeEntries);
         setDestinationAnalysis(analysis);
         const structural = analysis.conflicts.filter((c) => c.kind === "file-vs-folder" || c.kind === "folder-vs-file");
         if (structural.length) {
@@ -655,16 +696,32 @@ export default function Home() {
         const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
         if (effectivePolicy === "replace-confirm" && dangerous.length && !confirm(t("msg.confirmReplaceExplicit", { count: dangerous.length }))) return;
         const controller = new AbortController(); abortRef.current = controller;
-        setProgress({ written: 0, skipped: 0, total: u.length, current: t("preview.writePreparing") });
+        setProgress({ written: 0, skipped: 0, total: writeEntries.length, current: t("preview.writePreparing") });
         const journal = { ...j, destination: root.name, written: 0, skipped: 0 };
-        const result = await writeToDestination(root, u, effectivePolicy, controller.signal, (written, skipped, current) => {
-          setProgress({ written, skipped, total: u.length, current });
+        const result = await writeToDestination(root, writeEntries, effectivePolicy, controller.signal, (written, skipped, current) => {
+          setProgress({ written, skipped, total: writeEntries.length, current });
           localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
         }, locale);
-        if (result.written + result.skipped !== u.length) throw Error(t("msg.integrityCheckFailedWrite"));
-        const savedFiles = Math.max(0, outputFiles.length - result.skipped);
-        setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: result.skipped, complete: result.skipped === 0 && savedFiles === outputFiles.length });
-        localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: u.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
+        if (result.written + result.skipped !== writeEntries.length) throw Error(t("msg.integrityCheckFailedWrite"));
+        if (archiveBuild) {
+          // saved/skipped are expressed in terms of the original source
+          // files packed into each archive, not the archive file count - one
+          // failed archive file means every source file it would have
+          // contained wasn't actually saved anywhere.
+          const failedNames = new Set((result.failures || []).map((f) => f.path));
+          let savedFiles = 0, skippedFiles = 0;
+          archiveBuild.buckets.forEach((bucketFiles, i) => {
+            if (failedNames.has(archiveBuild.built[i].filename)) skippedFiles += bucketFiles.length;
+            else savedFiles += bucketFiles.length;
+          });
+          setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: skippedFiles, complete: result.skipped === 0 });
+          hist("Création", archiveBuild.multi ? `${output} (${archiveBuild.built.length} archives)` : output);
+        } else {
+          const savedFiles = Math.max(0, outputFiles.length - result.skipped);
+          setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: result.skipped, complete: result.skipped === 0 && savedFiles === outputFiles.length });
+          hist("Organisation", "Dossier");
+        }
+        localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: writeEntries.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
         if (result.skipped) {
           const failed = result.failures || [];
           const detail = failed.length
@@ -675,40 +732,12 @@ export default function Home() {
             : "";
           setError(t("msg.someItemsNotWritten", { count: result.skipped }) + detail);
         }
-        hist("Organisation", "Dossier");
       } else {
-        async function buildArchive(archiveEntries: ArchiveEntry[], archiveFiles: ArchiveEntry[], baseName: string) {
-          if (output === "GZIP") {
-            if (archiveFiles.length !== 1) throw Error(t("msg.gzipSingleFileOnly"));
-            return { data: await makeGzip(archiveFiles[0]), filename: `${baseName}.gz`, mime: "application/gzip" };
-          }
-          if (output === "TAR") return { data: makeTar(archiveEntries), filename: `${baseName}.tar`, mime: "application/x-tar" };
-          if (output === "TAR.GZ") return { data: await makeTarGz(archiveEntries), filename: `${baseName}.tar.gz`, mime: "application/gzip" };
-          return { data: await makeZip(archiveEntries, zipCompression), filename: `${baseName}.zip`, mime: "application/zip" };
-        }
-        const maxBytes = output !== "GZIP" ? Number(maxArchiveSizeMb) * 1024 * 1024 : 0;
-        const buckets = maxBytes > 0 ? bucketBySize(outputFiles, maxBytes) : [outputFiles];
-        const multi = buckets.length > 1;
-        if (multi) {
-          const oversized = buckets.filter((bucket) => bucket.length === 1 && bucket[0].size > maxBytes).length;
-          if (oversized) setError(t("msg.oversizedFilesInVolumes", { count: oversized }));
-        }
-        const directoryEntries = selectedEntries.filter((e) => e.directory);
-        let saved = 0;
-        for (let i = 0; i < buckets.length; i++) {
-          const bucketFiles = buckets[i], baseName = multi ? `${name}_part${i + 1}` : name;
-          const archiveEntries = multi ? [...directoryEntries, ...bucketFiles] : u;
-          const built = await buildArchive(archiveEntries, bucketFiles, baseName);
-          const expectedBytes = bucketFiles.reduce((sum, e) => sum + e.size, 0);
-          const verified = output === "GZIP"
-            ? await verifyProduced(built.data, built.filename, built.mime, bucketFiles.length, expectedBytes)
-            : await verifyProduced(built.data, built.filename, built.mime, archiveEntries.length, expectedBytes);
-          if (!verified) throw Error(t("msg.integrityCheckFailedCreate", { filename: built.filename }));
-          dl(built.data, built.filename, built.mime);
-          saved += bucketFiles.length;
-        }
+        const { built, buckets, multi } = await buildAllArchiveBuckets();
+        for (const one of built) dl(one.data, one.filename, one.mime);
+        const saved = buckets.reduce((sum, bucketFiles) => sum + bucketFiles.length, 0);
         setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved, skipped: 0, complete: true });
-        hist(mode === "extract" ? "Extraction" : "Création", multi ? `${output} (${buckets.length} archives)` : output);
+        hist(mode === "extract" ? "Extraction" : "Création", multi ? `${output} (${built.length} archives)` : output);
       }
       localStorage.setItem(
         "archiveflow-journal",
