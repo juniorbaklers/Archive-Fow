@@ -33,6 +33,7 @@ import {
   formatBytes,
   formatDuration,
   hashEntries,
+  localizedFsErrorMessage,
   makeGzip,
   makeTar,
   makeTarGz,
@@ -323,7 +324,7 @@ export default function Home() {
             all.push(...identified);
             reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: identified.length, status: identified.length ? "ok" : "empty", message: identified.length ? undefined : t("msg.noFileFoundInArchive") });
           } catch (archiveError) {
-            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : t("msg.readImpossible") });
+            reports.push({ id: `${f.name}-${index}`, name: f.name, root, count: 0, status: "error", message: archiveError instanceof Error ? localizedFsErrorMessage(archiveError, locale) : t("msg.readImpossible") });
           }
           setAnalyzeProgress({ done: index + 1, total: fs.length });
         }
@@ -368,7 +369,7 @@ export default function Home() {
       }
       await loadEntries(all);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("msg.analysisImpossible"));
+      setError(e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.analysisImpossible"));
     } finally {
       setBusy(false);
       setAnalyzeProgress(null);
@@ -398,7 +399,7 @@ export default function Home() {
           all.push(...identified);
           reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: identified.length, status: identified.length ? "ok" : "empty" });
         } catch (archiveError) {
-          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? archiveError.message : t("msg.readImpossible") });
+          reports.push({ id: `${item.path}-${index}`, name: item.path, root, count: 0, status: "error", message: archiveError instanceof Error ? localizedFsErrorMessage(archiveError, locale) : t("msg.readImpossible") });
         }
         setAnalyzeProgress({ done: index + 1, total: chosen.length });
       }
@@ -407,7 +408,7 @@ export default function Home() {
       setFolderArchives([]);
       const duplicateBases = [...new Set(bases.filter((base) => (totals.get(base.toLowerCase()) || 0) > 1))];
       if (duplicateBases.length) setNameWarning(t("msg.duplicateFolderArchiveNames", { names: duplicateBases.join(", ") }));
-    } catch (e) { setError(e instanceof Error ? e.message : t("msg.recursiveAnalysisImpossible")); }
+    } catch (e) { setError(e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.recursiveAnalysisImpossible")); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
   async function addFolder(l: FileList | null) {
@@ -446,14 +447,14 @@ export default function Home() {
         } catch (itemError) {
           done += 1;
           setAnalyzeProgress({ done, total: files.length });
-          unreadable.push(path + (itemError instanceof Error ? ` (${itemError.message})` : ""));
+          unreadable.push(`${path} (${localizedFsErrorMessage(itemError, locale)})`);
           return null;
         }
       }));
       const imported = settled.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       await loadEntries([...entries, ...imported]);
       if (unreadable.length) setNameWarning(t("msg.someItemsUnreadable", { count: unreadable.length, list: unreadable.slice(0, 5).join(" ; ") }));
-    } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
+    } catch (e) { setError(e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.recursiveAnalysisImpossible")); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
   async function pickCompleteCreateFolder() {
@@ -480,17 +481,17 @@ export default function Home() {
               // locked file, an unmaterialized cloud-sync placeholder...)
               // must not abort the rest of the folder - it's recorded and
               // the walk continues with everything else.
-              unreadable.push(itemParts.join("/") + (itemError instanceof Error ? ` (${itemError.message})` : ""));
+              unreadable.push(`${itemParts.join("/")} (${localizedFsErrorMessage(itemError, locale)})`);
             }
           }
         } catch (listError) {
-          unreadable.push(parts.join("/") + (listError instanceof Error ? ` (${listError.message})` : ""));
+          unreadable.push(`${parts.join("/")} (${localizedFsErrorMessage(listError, locale)})`);
         }
       };
       setBusy(true); setError(""); setAnalyzeProgress({ done: 0, total: 0 }); await walk(root, []);
       await loadEntries([...entries, ...imported]);
       if (unreadable.length) setNameWarning(t("msg.someItemsUnreadable", { count: unreadable.length, list: unreadable.slice(0, 5).join(" ; ") }));
-    } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
+    } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.recursiveAnalysisImpossible")); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
   function reset(m?: Mode) {
@@ -578,7 +579,7 @@ export default function Home() {
       }
       if (runAfter) await produce(true, handle);
     } catch (e) {
-      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : t("msg.folderInaccessible"));
+      if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.folderInaccessible"));
     } finally { setDestinationBusy(false); }
   }
   function hist(a: string, f: string) {
@@ -716,7 +717,7 @@ export default function Home() {
         JSON.stringify({ ...j, status: "erreur" }),
       );
       const cancelled = e instanceof DOMException && e.name === "AbortError";
-      setError(cancelled ? t("msg.operationCancelled") : e instanceof Error ? e.message : t("msg.operationImpossible"));
+      setError(cancelled ? t("msg.operationCancelled") : e instanceof Error ? localizedFsErrorMessage(e, locale) : t("msg.operationImpossible"));
     } finally {
       abortRef.current = null;
       setProgress(null);

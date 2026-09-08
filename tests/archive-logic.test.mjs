@@ -257,3 +257,18 @@ test("i18n covers the same keys in French and English, with a working fallback",
   assert.equal(translate("en", "nav.home"), "Home");
   assert.notEqual(translate("fr", "nav.home"), translate("en", "nav.home"));
 });
+
+test("localizedFsErrorMessage translates native browser/file-system errors instead of leaking their English text", async () => {
+  const { localizedFsErrorMessage } = await loadArchiveUtils();
+  const notFound = new DOMException("A requested file or directory could not be found at the time an operation was processed.", "NotFoundError");
+  assert.equal(localizedFsErrorMessage(notFound, "fr"), "Fichier ou dossier introuvable au moment du traitement (déplacé, renommé ou supprimé entre-temps).");
+  assert.equal(localizedFsErrorMessage(notFound, "en"), "File or folder not found while processing it (moved, renamed, or deleted in the meantime).");
+
+  const badName = new TypeError("Failed to execute 'getFileHandle' on 'FileSystemDirectoryHandle': Name is not allowed.");
+  assert.match(localizedFsErrorMessage(badName, "fr"), /caractère non autorisé/);
+
+  // Our own already-translated errors must pass through unchanged, not get
+  // wrapped in a "browser technical error" prefix meant only for native ones.
+  const ownError = new Error("Contrôle d’intégrité échoué : le nombre d’éléments traités ne correspond pas à la sélection.");
+  assert.equal(localizedFsErrorMessage(ownError, "fr"), ownError.message);
+});

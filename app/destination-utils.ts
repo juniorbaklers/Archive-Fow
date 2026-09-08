@@ -1,4 +1,4 @@
-import { ArchiveEntry } from "./archive-utils";
+import { ArchiveEntry, localizedFsErrorMessage } from "./archive-utils";
 import { CollisionPolicy } from "./smart-engine";
 import { Locale, translate } from "./i18n";
 
@@ -120,7 +120,7 @@ export async function writeToDestination(root: FileSystemDirectoryHandle, entrie
       // limit, a permission hiccup...) must not abort every entry after it -
       // it's recorded as a failure and the batch continues.
       skipped++;
-      failures.push({ path: parts.join("/"), reason: error instanceof Error ? error.message : String(error) });
+      failures.push({ path: parts.join("/"), reason: localizedFsErrorMessage(error, locale) });
       onProgress(written, skipped, parts.join("/"));
     }
   }

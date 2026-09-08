@@ -1,5 +1,25 @@
 import { Locale, translate } from "./i18n";
 export class SecurityError extends Error {}
+// Browser/File System Access API errors (DOMException, TypeError for an
+// illegal name...) always carry an English-only message baked into the
+// browser itself - it can't be translated. Map the small set of error
+// *kinds* we actually see to a localized message instead, keeping the raw
+// browser text only as a technical fallback detail.
+export function localizedFsErrorMessage(error: unknown, locale: Locale): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotFoundError") return translate(locale, "error.fs.notFound");
+    if (error.name === "TypeMismatchError") return translate(locale, "error.fs.typeMismatch");
+    if (error.name === "InvalidCharacterError" || error.name === "InvalidModificationError") return translate(locale, "error.fs.invalidName");
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") return translate(locale, "error.fs.permission");
+    if (error.name === "QuotaExceededError") return translate(locale, "error.fs.quotaExceeded");
+    return translate(locale, "error.fs.generic", { detail: error.message });
+  }
+  // A plain TypeError from the File System Access API (e.g. an illegal
+  // character in a name) - unlike our own thrown Errors, which are never
+  // TypeErrors and already carry an already-translated message.
+  if (error instanceof TypeError) return translate(locale, "error.fs.invalidName");
+  return error instanceof Error ? error.message : String(error);
+}
 export type ArchiveEntry = {
   name: string;
   size: number;
