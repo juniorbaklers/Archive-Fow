@@ -133,7 +133,7 @@ export default function Home() {
     [destination, setDestination] = useState<FileSystemDirectoryHandle | null>(null),
     [destinationAnalysis, setDestinationAnalysis] = useState<DestinationAnalysis | null>(null),
     [destinationBusy, setDestinationBusy] = useState(false),
-    [progress, setProgress] = useState<{ written: number; skipped: number; current: string } | null>(null),
+    [progress, setProgress] = useState<{ written: number; skipped: number; total: number; current: string } | null>(null),
     [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null),
     [nameWarning, setNameWarning] = useState(""),
     [theme, setTheme] = useState<"light" | "dark">("light"),
@@ -618,10 +618,10 @@ export default function Home() {
         const dangerous = analysis.conflicts.filter((c) => c.kind !== "same-content-other-path");
         if (effectivePolicy === "replace-confirm" && dangerous.length && !confirm(t("msg.confirmReplaceExplicit", { count: dangerous.length }))) return;
         const controller = new AbortController(); abortRef.current = controller;
-        setProgress({ written: 0, skipped: 0, current: "Préparation" });
+        setProgress({ written: 0, skipped: 0, total: u.length, current: t("preview.writePreparing") });
         const journal = { ...j, destination: root.name, written: 0, skipped: 0 };
         const result = await writeToDestination(root, u, effectivePolicy, controller.signal, (written, skipped, current) => {
-          setProgress({ written, skipped, current });
+          setProgress({ written, skipped, total: u.length, current });
           localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, status: "en cours", written, skipped, current }));
         }, locale);
         if (result.written + result.skipped !== u.length) throw Error(t("msg.integrityCheckFailedWrite"));
@@ -1102,11 +1102,14 @@ export default function Home() {
             {busy ? (
               <div className="v2empty">
                 <RefreshCcw className="spin" />
-                <b>{t("preview.analyzing")}</b>
-                {analyzeProgress && analyzeProgress.total > 0 && (
+                <b>{progress ? t("preview.writing") : t("preview.analyzing")}</b>
+                {progress && (
+                  <p>{t("preview.writeProgressPercent", { percent: Math.round(((progress.written + progress.skipped) / Math.max(1, progress.total)) * 100), done: progress.written + progress.skipped, total: progress.total, current: progress.current })}</p>
+                )}
+                {!progress && analyzeProgress && analyzeProgress.total > 0 && (
                   <p>{t("preview.analyzeProgressPercent", { percent: Math.round((analyzeProgress.done / analyzeProgress.total) * 100), done: analyzeProgress.done, total: analyzeProgress.total })}</p>
                 )}
-                {analyzeProgress && analyzeProgress.total === 0 && analyzeProgress.done > 0 && (
+                {!progress && analyzeProgress && analyzeProgress.total === 0 && analyzeProgress.done > 0 && (
                   <p>{t("preview.analyzeProgressCount", { count: analyzeProgress.done })}</p>
                 )}
               </div>
