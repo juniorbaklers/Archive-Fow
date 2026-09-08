@@ -272,26 +272,26 @@ export async function readZip(file: File, limits: SecurityLimits = DEFAULT_SECUR
       compressedTotal += cs;
       checkSecurity(name, i + 1, expandedTotal, compressedTotal, limits, locale);
     }
-    if (!isDirectory) {
-      if (suspicious) {
-        out.push({
-          name,
-          size,
-          data: new Uint8Array(),
-          source: file.name,
-          quarantined: true,
-          quarantineReason: translate(locale, "error.ratioExceeds", { ratio: Math.round(entryRatio), limit: limits.maxRatio }),
-        });
-      } else {
-        if (method !== 0 && method !== 8)
-          throw Error(translate(locale, "error.unsupportedZipCompression", { name }));
-        out.push({
-          name,
-          size,
-          data: method === 0 ? packed : await decompress(packed, "deflate-raw"),
-          source: file.name,
-        });
-      }
+    if (isDirectory) {
+      out.push({ name, size: 0, data: new Uint8Array(), source: file.name, directory: true });
+    } else if (suspicious) {
+      out.push({
+        name,
+        size,
+        data: new Uint8Array(),
+        source: file.name,
+        quarantined: true,
+        quarantineReason: translate(locale, "error.ratioExceeds", { ratio: Math.round(entryRatio), limit: limits.maxRatio }),
+      });
+    } else {
+      if (method !== 0 && method !== 8)
+        throw Error(translate(locale, "error.unsupportedZipCompression", { name }));
+      out.push({
+        name,
+        size,
+        data: method === 0 ? packed : await decompress(packed, "deflate-raw"),
+        source: file.name,
+      });
     }
     cur += 46 + nl + el + cl;
   }
@@ -315,7 +315,16 @@ export function readTarBytes(bytes: Uint8Array, source: string) {
       mtime = octal(bytes.slice(o + 136, o + 148)),
       type = bytes[o + 156];
     o += 512;
-    if (name && type !== 53)
+    if (name && type === 53)
+      out.push({
+        name,
+        size: 0,
+        data: new Uint8Array(),
+        date: mtime ? new Date(mtime * 1000) : undefined,
+        source,
+        directory: true,
+      });
+    else if (name)
       out.push({
         name,
         size,

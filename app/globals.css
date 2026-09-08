@@ -728,6 +728,12 @@
 .savereport small { font-size: var(--fs-2xs); }
 .savereport.complete { border: 1px solid #a9d9c5; background: var(--success-soft); color: var(--success-700); }
 .savereport.incomplete { border: 1px solid #efb8bd; background: var(--danger-soft); color: var(--danger-700); }
+.startnewoperation {
+  display: flex; align-items: center; gap: 6px; margin-left: auto; padding: 8px 12px;
+  border: 1px solid currentColor; border-radius: var(--r-sm); background: transparent;
+  color: inherit; font-size: var(--fs-2xs); font-weight: 800; white-space: nowrap;
+}
+.startnewoperation svg { width: 14px; }
 
 .archivereports { margin: 10px 22px 0; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
 .archivereports > header { display: flex; justify-content: space-between; padding: 9px 11px; background: var(--surface-sunken); color: var(--ink-600); font-size: var(--fs-2xs); font-weight: 700; }

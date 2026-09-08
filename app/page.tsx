@@ -6,6 +6,7 @@ import {
   FileArchive,
   FolderOpen,
   FolderTree,
+  Home as HomeIcon,
   Info,
   Layers3,
   ListTree,
@@ -1096,7 +1097,7 @@ export default function Home() {
               <div className="v2error"><Info /><div><b>{t("preview.quarantinedTitle", { count: quarantinedCount })}</b><small>{t("preview.quarantinedHint")}</small></div></div>
             )}
             {lastReport && (
-              <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? t("preview.saveCompleteTitle") : t("preview.saveIncompleteTitle")}</b><small>{t("preview.saveReportSummary", { detected: lastReport.detected, selected: lastReport.selected, saved: lastReport.saved, skipped: lastReport.skipped })}</small></div></div>
+              <div className={lastReport.complete ? "savereport complete" : "savereport incomplete"}><CheckCircle2 /><div><b>{lastReport.complete ? t("preview.saveCompleteTitle") : t("preview.saveIncompleteTitle")}</b><small>{t("preview.saveReportSummary", { detected: lastReport.detected, selected: lastReport.selected, saved: lastReport.saved, skipped: lastReport.skipped })}</small></div><button className="startnewoperation" onClick={() => { reset(); setScreen("home"); }}><HomeIcon />{t("preview.startNewOperation")}</button></div>
             )}
             {busy ? (
               <div className="v2empty">

@@ -37,6 +37,35 @@ test("ZIP round-trip preserves content and path with deflate compression", async
   assert.equal(new TextDecoder().decode(read[0].data), text);
 });
 
+test("ZIP round-trip preserves empty directory entries", async () => {
+  const { makeZip, readArchive } = await loadArchiveUtils();
+  const entries = [
+    { name: "DCIM", size: 0, data: new Uint8Array(), source: "test", directory: true },
+    { name: "docs/readme.txt", size: 5, data: new TextEncoder().encode("hello"), source: "test" },
+  ];
+  const zipBytes = await makeZip(entries, "deflate");
+  const file = new File([zipBytes], "empty-folder.zip", { type: "application/zip" });
+  const read = await readArchive(file);
+  assert.equal(read.length, 2);
+  const dcim = read.find((e) => e.name === "DCIM");
+  assert.ok(dcim, "empty directory entry must survive the ZIP round-trip");
+  assert.equal(dcim.directory, true);
+});
+
+test("TAR round-trip preserves empty directory entries", async () => {
+  const { makeTar, readTarBytes } = await loadArchiveUtils();
+  const entries = [
+    { name: "DCIM", size: 0, data: new Uint8Array(), source: "test", directory: true },
+    { name: "docs/readme.txt", size: 5, data: new TextEncoder().encode("hello"), source: "test" },
+  ];
+  const tarBytes = makeTar(entries);
+  const read = readTarBytes(tarBytes, "test.tar");
+  assert.equal(read.length, 2);
+  const dcim = read.find((e) => e.name.replace(/\/$/, "") === "DCIM");
+  assert.ok(dcim, "empty directory entry must survive the TAR round-trip");
+  assert.equal(dcim.directory, true);
+});
+
 test("quarantines an entry with an abnormal compression ratio instead of decompressing it", async () => {
   const { makeZip, readZip, DEFAULT_SECURITY_LIMITS } = await loadArchiveUtils();
   const data = new Uint8Array(2_000_000); // all zeros: compresses far past the default 200:1 ratio limit
