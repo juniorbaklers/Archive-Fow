@@ -230,3 +230,41 @@ test("shows a disk-space estimate once a destination is analyzed", { timeout: 90
   assert.deepEqual(consoleErrors, []);
   await page.close();
 });
+
+test("creates an archive from an imported folder that contains a subfolder", { timeout: 90000 }, async () => {
+  const { page, consoleErrors } = await openPage();
+  await page.addInitScript({ content: directoryPickerMockScript(0) });
+  await page.reload({ waitUntil: "networkidle" });
+
+  // Seed the mocked source folder with files nested inside a subfolder, so
+  // the recursive import creates a directory placeholder entry alongside
+  // the files - this is what made archive creation fail the post-write
+  // integrity check and silently produce no download at all.
+  await page.evaluate(() => {
+    const root = window.__mockRoot;
+    const sub = new root.constructor("sousdossier");
+    const addFile = (dir, name, text) => {
+      const handle = { kind: "file", name, async getFile() { return { name, size: text.length, lastModified: Date.now(), arrayBuffer: async () => new TextEncoder().encode(text).buffer }; } };
+      dir.children.set(name, handle);
+    };
+    addFile(root, "a.txt", "hello a");
+    addFile(sub, "b.txt", "hello b");
+    root.children.set("sousdossier", sub);
+  });
+
+  await page.locator(".homeaction", { hasText: "Créer une archive" }).click();
+  await page.locator("button", { hasText: "Importer un dossier complet" }).click();
+  await page.waitForTimeout(800);
+
+  assert.deepEqual(await page.locator(".v2error").allInnerTexts(), []);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 20000 }),
+    page.locator("button", { hasText: "Télécharger" }).click(),
+  ]);
+  assert.ok(download, "expected the archive to actually download");
+  assert.deepEqual(await page.locator(".v2error").allInnerTexts(), [], "no integrity-check error should follow");
+
+  assert.deepEqual(consoleErrors, []);
+  await page.close();
+});

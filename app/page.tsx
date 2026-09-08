@@ -697,9 +697,12 @@ export default function Home() {
         let saved = 0;
         for (let i = 0; i < buckets.length; i++) {
           const bucketFiles = buckets[i], baseName = multi ? `${name}_part${i + 1}` : name;
-          const built = await buildArchive(multi ? [...directoryEntries, ...bucketFiles] : u, bucketFiles, baseName);
+          const archiveEntries = multi ? [...directoryEntries, ...bucketFiles] : u;
+          const built = await buildArchive(archiveEntries, bucketFiles, baseName);
           const expectedBytes = bucketFiles.reduce((sum, e) => sum + e.size, 0);
-          const verified = await verifyProduced(built.data, built.filename, built.mime, bucketFiles.length, expectedBytes);
+          const verified = output === "GZIP"
+            ? await verifyProduced(built.data, built.filename, built.mime, bucketFiles.length, expectedBytes)
+            : await verifyProduced(built.data, built.filename, built.mime, archiveEntries.length, expectedBytes);
           if (!verified) throw Error(t("msg.integrityCheckFailedCreate", { filename: built.filename }));
           dl(built.data, built.filename, built.mime);
           saved += bucketFiles.length;
