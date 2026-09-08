@@ -23,6 +23,39 @@ after(async () => {
 
 const loadArchiveUtils = () => vite.ssrLoadModule("/app/archive-utils.ts");
 const loadSmartEngine = () => vite.ssrLoadModule("/app/smart-engine.ts");
+const loadDestinationUtils = () => vite.ssrLoadModule("/app/destination-utils.ts");
+
+// A mock FileSystemDirectoryHandle that mimics the real File System Access
+// API: getFileHandle() rejects with a TypeError for names containing
+// characters that are illegal on real filesystems, exactly like Chrome does
+// against a real destination folder.
+class MockFileHandle {
+  constructor(name) { this.kind = "file"; this.name = name; this._data = new Uint8Array(0); }
+  async getFile() { return { name: this.name, size: this._data.length, arrayBuffer: async () => this._data.buffer }; }
+  async createWritable() {
+    const self = this;
+    return {
+      write: async (chunk) => { self._data = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk); },
+      close: async () => {},
+    };
+  }
+}
+class MockDirHandle {
+  constructor(name) { this.kind = "directory"; this.name = name; this.children = new Map(); }
+  async getFileHandle(name, opts) {
+    if (/[:*?"<>|]/.test(name)) throw new TypeError(`Failed to execute 'getFileHandle': Name contains invalid characters: ${name}`);
+    const existing = this.children.get(name);
+    if (existing) return existing;
+    if (opts && opts.create) { const h = new MockFileHandle(name); this.children.set(name, h); return h; }
+    throw new DOMException("not found", "NotFoundError");
+  }
+  async getDirectoryHandle(name, opts) {
+    const existing = this.children.get(name);
+    if (existing) return existing;
+    if (opts && opts.create) { const h = new MockDirHandle(name); this.children.set(name, h); return h; }
+    throw new DOMException("not found", "NotFoundError");
+  }
+}
 
 test("ZIP round-trip preserves content and path with deflate compression", async () => {
   const { makeZip, readArchive } = await loadArchiveUtils();
@@ -64,6 +97,23 @@ test("TAR round-trip preserves empty directory entries", async () => {
   const dcim = read.find((e) => e.name.replace(/\/$/, "") === "DCIM");
   assert.ok(dcim, "empty directory entry must survive the TAR round-trip");
   assert.equal(dcim.directory, true);
+});
+
+test("writeToDestination skips a file it cannot write instead of aborting the whole batch", async () => {
+  const { writeToDestination } = await loadDestinationUtils();
+  const root = new MockDirHandle("dest");
+  const entries = [
+    { name: "a.txt", planned: "a.txt", size: 3, data: new TextEncoder().encode("aaa"), source: "t" },
+    { name: "bad:name.txt", planned: "bad:name.txt", size: 3, data: new TextEncoder().encode("bbb"), source: "t" },
+    { name: "c.txt", planned: "c.txt", size: 3, data: new TextEncoder().encode("ccc"), source: "t" },
+    { name: "d.txt", planned: "d.txt", size: 3, data: new TextEncoder().encode("ddd"), source: "t" },
+  ];
+  const result = await writeToDestination(root, entries, "keep-both", new AbortController().signal, () => {}, "fr");
+  assert.equal(result.written, 3, "the 3 writable entries must still be written");
+  assert.equal(result.skipped, 1);
+  assert.equal(result.failures.length, 1);
+  assert.equal(result.failures[0].path, "bad:name.txt");
+  assert.deepEqual([...root.children.keys()].sort(), ["a.txt", "c.txt", "d.txt"]);
 });
 
 test("quarantines an entry with an abnormal compression ratio instead of decompressing it", async () => {

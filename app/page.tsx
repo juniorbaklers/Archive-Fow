@@ -336,22 +336,34 @@ export default function Home() {
         setArchiveReports([]);
         const existingNames = new Set(entries.filter((e) => !e.directory).map((e) => e.name.toLowerCase()));
         const duplicateNames = [...new Set(rawFiles.filter((f) => existingNames.has(f.name.toLowerCase())).map((f) => f.name))];
-        if (duplicateNames.length) setNameWarning(t("msg.duplicateFileNames", { which: t(duplicateNames.length > 1 ? "msg.duplicateFileNamesPlural" : "msg.duplicateFileNameSingular"), names: duplicateNames.join(", ") }));
+        const warnings: string[] = [];
+        if (duplicateNames.length) warnings.push(t("msg.duplicateFileNames", { which: t(duplicateNames.length > 1 ? "msg.duplicateFileNamesPlural" : "msg.duplicateFileNameSingular"), names: duplicateNames.join(", ") }));
         let done = 0;
-        const added = await Promise.all(
+        const unreadable: string[] = [];
+        const settled = await Promise.all(
           rawFiles.map(async (f) => {
-            const entry = {
-              name: f.name,
-              size: f.size,
-              data: new Uint8Array(await f.arrayBuffer()),
-              date: new Date(f.lastModified),
-              source: t("sources.addedFilesGroup"),
-            };
-            done += 1;
-            setAnalyzeProgress({ done, total: rawFiles.length });
-            return entry;
+            try {
+              const entry = {
+                name: f.name,
+                size: f.size,
+                data: new Uint8Array(await f.arrayBuffer()),
+                date: new Date(f.lastModified),
+                source: t("sources.addedFilesGroup"),
+              };
+              done += 1;
+              setAnalyzeProgress({ done, total: rawFiles.length });
+              return entry;
+            } catch (itemError) {
+              done += 1;
+              setAnalyzeProgress({ done, total: rawFiles.length });
+              unreadable.push(f.name + (itemError instanceof Error ? ` (${itemError.message})` : ""));
+              return null;
+            }
           }),
         );
+        const added = settled.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+        if (unreadable.length) warnings.push(t("msg.someItemsUnreadable", { count: unreadable.length, list: unreadable.slice(0, 5).join(" ; ") }));
+        if (warnings.length) setNameWarning(warnings.join(" "));
         all = [...entries, ...added];
       }
       await loadEntries(all);
@@ -422,15 +434,25 @@ export default function Home() {
       const files = Array.from(l), first = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath || files[0].name;
       const rootName = uniqueSourceName(first.split("/")[0]);
       let done = 0;
-      const imported = await Promise.all(files.map(async (file) => {
+      const unreadable: string[] = [];
+      const settled = await Promise.all(files.map(async (file) => {
         const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-        const path = relative.split("/").slice(1).join("/");
-        const entry = { name: path || file.name, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
-        done += 1;
-        setAnalyzeProgress({ done, total: files.length });
-        return entry;
+        const path = relative.split("/").slice(1).join("/") || file.name;
+        try {
+          const entry = { name: path, size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot };
+          done += 1;
+          setAnalyzeProgress({ done, total: files.length });
+          return entry;
+        } catch (itemError) {
+          done += 1;
+          setAnalyzeProgress({ done, total: files.length });
+          unreadable.push(path + (itemError instanceof Error ? ` (${itemError.message})` : ""));
+          return null;
+        }
       }));
+      const imported = settled.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       await loadEntries([...entries, ...imported]);
+      if (unreadable.length) setNameWarning(t("msg.someItemsUnreadable", { count: unreadable.length, list: unreadable.slice(0, 5).join(" ; ") }));
     } catch (e) { setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
@@ -440,20 +462,34 @@ export default function Home() {
     try {
       const root = await picker();
       setNameWarning("");
-      const rootName = uniqueSourceName(root.name), files: File[] = [], imported: ArchiveEntry[] = [];
+      const rootName = uniqueSourceName(root.name), files: File[] = [], imported: ArchiveEntry[] = [], unreadable: string[] = [];
       const walk = async (dir: FileSystemDirectoryHandle, parts: string[]) => {
         if (preserveEmpty && parts.length) imported.push({ name: parts.join("/"), size: 0, data: new Uint8Array(), source: rootName, directory: true, rootless: !preserveRoot });
-        for await (const [itemName, handle] of (dir as any).entries()) {
-          if (handle.kind === "directory") await walk(handle, [...parts, itemName]);
-          else {
-            const file = await handle.getFile(); files.push(file);
-            imported.push({ name: [...parts, itemName].join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot });
-            setAnalyzeProgress({ done: files.length, total: 0 });
+        try {
+          for await (const [itemName, handle] of (dir as any).entries()) {
+            const itemParts = [...parts, itemName];
+            try {
+              if (handle.kind === "directory") await walk(handle, itemParts);
+              else {
+                const file = await handle.getFile(); files.push(file);
+                imported.push({ name: itemParts.join("/"), size: file.size, data: new Uint8Array(await file.arrayBuffer()), date: new Date(file.lastModified), source: rootName, rootless: !preserveRoot });
+                setAnalyzeProgress({ done: files.length, total: 0 });
+              }
+            } catch (itemError) {
+              // A single unreadable file or subfolder (permission denied, a
+              // locked file, an unmaterialized cloud-sync placeholder...)
+              // must not abort the rest of the folder - it's recorded and
+              // the walk continues with everything else.
+              unreadable.push(itemParts.join("/") + (itemError instanceof Error ? ` (${itemError.message})` : ""));
+            }
           }
+        } catch (listError) {
+          unreadable.push(parts.join("/") + (listError instanceof Error ? ` (${listError.message})` : ""));
         }
       };
       setBusy(true); setError(""); setAnalyzeProgress({ done: 0, total: 0 }); await walk(root, []);
       await loadEntries([...entries, ...imported]);
+      if (unreadable.length) setNameWarning(t("msg.someItemsUnreadable", { count: unreadable.length, list: unreadable.slice(0, 5).join(" ; ") }));
     } catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : "Importation du dossier impossible"); }
     finally { setBusy(false); setAnalyzeProgress(null); }
   }
@@ -628,7 +664,16 @@ export default function Home() {
         const savedFiles = Math.max(0, outputFiles.length - result.skipped);
         setLastReport({ detected: entries.filter((e) => !e.directory).length, selected: outputFiles.length, saved: savedFiles, skipped: result.skipped, complete: result.skipped === 0 && savedFiles === outputFiles.length });
         localStorage.setItem("archiveflow-journal", JSON.stringify({ ...journal, ...result, expected: u.length, status: result.skipped ? "terminé avec exclusions" : "terminé" }));
-        if (result.skipped) setError(t("msg.someItemsNotWritten", { count: result.skipped }));
+        if (result.skipped) {
+          const failed = result.failures || [];
+          const detail = failed.length
+            ? t("msg.writeFailuresDetail", {
+                list: failed.slice(0, 5).map((f) => `${f.path} (${f.reason})`).join(" ; "),
+                more: failed.length > 5 ? ` …+${failed.length - 5}` : "",
+              })
+            : "";
+          setError(t("msg.someItemsNotWritten", { count: result.skipped }) + detail);
+        }
         hist("Organisation", "Dossier");
       } else {
         async function buildArchive(archiveEntries: ArchiveEntry[], archiveFiles: ArchiveEntry[], baseName: string) {

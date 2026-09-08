@@ -84,33 +84,45 @@ async function uniqueFileName(dir: FileSystemDirectoryHandle, name: string) {
   for (let index = 2; await existingKind(dir, candidate); index++) candidate = `${stem} (${index})${extension}`;
   return candidate;
 }
+export type WriteFailure = { path: string; reason: string };
 export async function writeToDestination(root: FileSystemDirectoryHandle, entries: ArchiveEntry[], policy: CollisionPolicy, signal: AbortSignal, onProgress: (written: number, skipped: number, current: string) => void, locale: Locale = "fr") {
   let written = 0, skipped = 0;
+  const failures: WriteFailure[] = [];
   for (const entry of entries) {
     if (signal.aborted) throw new DOMException(translate(locale, "error.operationCancelled"), "AbortError");
-    const parts = clean(entry.planned || entry.name); let dir = root, impossible = false;
-    for (const part of parts.slice(0, -1)) {
-      const found = await existingKind(dir, part);
-      if (found?.kind === "file") { impossible = true; break; }
-      dir = found?.kind === "directory" ? found.handle : await dir.getDirectoryHandle(part, { create: true });
+    const parts = clean(entry.planned || entry.name);
+    try {
+      let dir = root, impossible = false;
+      for (const part of parts.slice(0, -1)) {
+        const found = await existingKind(dir, part);
+        if (found?.kind === "file") { impossible = true; break; }
+        dir = found?.kind === "directory" ? found.handle : await dir.getDirectoryHandle(part, { create: true });
+      }
+      if (impossible) { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
+      if (entry.directory) {
+        const folder = parts.at(-1)!;
+        const found = await existingKind(dir, folder);
+        if (!found) await dir.getDirectoryHandle(folder, { create: true });
+        else if (found.kind === "file") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
+        written++; onProgress(written, skipped, parts.join("/")); continue;
+      }
+      let filename = parts.at(-1)!; const found = await existingKind(dir, filename);
+      if (found) {
+        if (found.kind === "directory" || policy === "skip") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
+        if (policy === "keep-both" || policy === "rename") filename = await uniqueFileName(dir, filename);
+        if (policy === "duplicates-folder") { dir = await root.getDirectoryHandle("Doublons", { create: true }); filename = await uniqueFileName(dir, filename); }
+      }
+      const writer = await (await dir.getFileHandle(filename, { create: true })).createWritable();
+      await writer.write(entry.data as FileSystemWriteChunkType); await writer.close();
+      written++; onProgress(written, skipped, parts.join("/"));
+    } catch (error) {
+      // A single unwritable entry (illegal character in its name, a quota
+      // limit, a permission hiccup...) must not abort every entry after it -
+      // it's recorded as a failure and the batch continues.
+      skipped++;
+      failures.push({ path: parts.join("/"), reason: error instanceof Error ? error.message : String(error) });
+      onProgress(written, skipped, parts.join("/"));
     }
-    if (impossible) { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
-    if (entry.directory) {
-      const folder = parts.at(-1)!;
-      const found = await existingKind(dir, folder);
-      if (!found) await dir.getDirectoryHandle(folder, { create: true });
-      else if (found.kind === "file") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
-      written++; onProgress(written, skipped, parts.join("/")); continue;
-    }
-    let filename = parts.at(-1)!; const found = await existingKind(dir, filename);
-    if (found) {
-      if (found.kind === "directory" || policy === "skip") { skipped++; onProgress(written, skipped, parts.join("/")); continue; }
-      if (policy === "keep-both" || policy === "rename") filename = await uniqueFileName(dir, filename);
-      if (policy === "duplicates-folder") { dir = await root.getDirectoryHandle("Doublons", { create: true }); filename = await uniqueFileName(dir, filename); }
-    }
-    const writer = await (await dir.getFileHandle(filename, { create: true })).createWritable();
-    await writer.write(entry.data as FileSystemWriteChunkType); await writer.close();
-    written++; onProgress(written, skipped, parts.join("/"));
   }
-  return { written, skipped };
+  return { written, skipped, failures };
 }
