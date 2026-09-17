@@ -143,7 +143,8 @@ function directoryPickerMockScript(delayMs) {
       async *entries() { for (const pair of this.children) yield pair; }
     }
     window.__mockRoot = new MockDirHandle("dossier-test");
-    window.showDirectoryPicker = async () => window.__mockRoot;
+    window.__pickerOptions = null;
+    window.showDirectoryPicker = async (options) => { window.__pickerOptions = options; return window.__mockRoot; };
   })();`;
 }
 
@@ -280,6 +281,12 @@ test("shows a disk-space estimate once a destination is analyzed", { timeout: 90
   await page.waitForSelector(".destinationcheck", { timeout: 20000 });
   const statusText = await page.locator(".destinationcheck small").innerText();
   assert.match(statusText, /stockage (estimé disponible|non estimable)/);
+
+  // showDirectoryPicker() defaults to read-only access - without an
+  // explicit "readwrite" mode, every subsequent file write into the chosen
+  // folder is silently denied by the browser.
+  const pickerOptions = await page.evaluate(() => window.__pickerOptions);
+  assert.equal(pickerOptions?.mode, "readwrite", "the destination picker must request write access");
 
   assert.deepEqual(consoleErrors, []);
   await page.close();

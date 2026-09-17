@@ -46,9 +46,15 @@ async function scanFiles(dir: FileSystemDirectoryHandle, prefix = "", out: { pat
   return out;
 }
 export async function pickDestination(locale: Locale = "fr") {
-  const picker = (window as any).showDirectoryPicker as undefined | (() => Promise<FileSystemDirectoryHandle>);
+  const picker = (window as any).showDirectoryPicker as
+    | undefined
+    | ((options?: { mode?: "read" | "readwrite" }) => Promise<FileSystemDirectoryHandle>);
   if (!picker) throw Error(translate(locale, "error.directoryPickerUnavailable"));
-  return picker();
+  // This picker is only ever used to choose a folder ArchiveFlow writes
+  // into. Without an explicit "readwrite" mode, showDirectoryPicker()
+  // defaults to read-only access, and every subsequent file write is
+  // silently denied.
+  return picker({ mode: "readwrite" });
 }
 export async function analyzeDestination(root: FileSystemDirectoryHandle, entries: ArchiveEntry[]): Promise<DestinationAnalysis> {
   const existing = await scanFiles(root), hashes = new Map<string, string[]>(), conflicts: DestinationConflict[] = [];
