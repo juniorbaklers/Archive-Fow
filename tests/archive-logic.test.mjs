@@ -99,6 +99,73 @@ test("TAR round-trip preserves empty directory entries", async () => {
   assert.equal(dcim.directory, true);
 });
 
+// Minimal hand-built TAR blocks to exercise the extensions real-world tar
+// tools use for paths longer than the classic 100-byte name field, without
+// depending on a system `tar` binary being available to the test runner.
+function tarHeader({ name = "", size = 0, type = "0" }) {
+  const h = new Uint8Array(512), enc = new TextEncoder();
+  h.set(enc.encode(name.slice(0, 100)), 0);
+  h.set(enc.encode(size.toString(8).padStart(11, "0") + "\0"), 124);
+  h[156] = type.charCodeAt(0);
+  return h;
+}
+function padTo512(bytes) {
+  const out = new Uint8Array(Math.ceil(bytes.length / 512) * 512);
+  out.set(bytes);
+  return out;
+}
+function concatBytes(...chunks) {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0), out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.length; }
+  return out;
+}
+function paxRecord(key, value) {
+  const enc = new TextEncoder();
+  let len = key.length + value.length + 4;
+  for (;;) {
+    const candidate = enc.encode(`${len} ${key}=${value}\n`);
+    if (candidate.length === len) return candidate;
+    len = candidate.length;
+  }
+}
+
+test("TAR reader follows a GNU longname entry to recover a path over 100 bytes", async () => {
+  const { readTarBytes } = await loadArchiveUtils();
+  const longName = "un_dossier_avec_un_chemin_deliberement_tres_long_pour_depasser_la_limite/fichier_final.txt";
+  const enc = new TextEncoder();
+  const longNameData = enc.encode(`${longName}\0`);
+  const longNameBlock = concatBytes(tarHeader({ name: "././@LongLink", size: longNameData.length, type: "L" }), padTo512(longNameData));
+  const content = enc.encode("contenu");
+  const realBlock = concatBytes(tarHeader({ name: longName.slice(0, 99), size: content.length, type: "0" }), padTo512(content));
+  const tarBytes = concatBytes(longNameBlock, realBlock, new Uint8Array(1024));
+
+  const read = readTarBytes(tarBytes, "test.tar");
+  assert.equal(read.length, 1);
+  assert.equal(read[0].name, longName);
+  assert.equal(new TextDecoder().decode(read[0].data), "contenu");
+});
+
+test("TAR reader follows a PAX extended header to recover a long path with multi-byte characters", async () => {
+  const { readTarBytes } = await loadArchiveUtils();
+  // "été" is multi-byte in UTF-8 - the PAX record length is a byte count,
+  // so this also guards against decoding the whole header to a string
+  // before slicing by that length (which drifts out of sync as soon as a
+  // multi-byte character appears before the end of the record).
+  const longName = "dossier_projet/rapport_de_synthese_été_2026_" + "x".repeat(60) + ".txt";
+  const record = paxRecord("path", longName);
+  const paxBlock = concatBytes(tarHeader({ name: "PaxHeaders/x", size: record.length, type: "x" }), padTo512(record));
+  const enc = new TextEncoder();
+  const content = enc.encode("bonjour");
+  const realBlock = concatBytes(tarHeader({ name: longName.slice(0, 99), size: content.length, type: "0" }), padTo512(content));
+  const tarBytes = concatBytes(paxBlock, realBlock, new Uint8Array(1024));
+
+  const read = readTarBytes(tarBytes, "test.tar");
+  assert.equal(read.length, 1);
+  assert.equal(read[0].name, longName);
+  assert.equal(new TextDecoder().decode(read[0].data), "bonjour");
+});
+
 test("writeToDestination skips a file it cannot write instead of aborting the whole batch", async () => {
   const { writeToDestination } = await loadDestinationUtils();
   const root = new MockDirHandle("dest");

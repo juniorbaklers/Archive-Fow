@@ -325,16 +325,57 @@ function octal(bytes: Uint8Array) {
     ) || 0
   );
 }
+// PAX extended-header data is a sequence of "<length> <key>=<value>\n" records
+// (length = decimal byte count of the whole record, itself included). Only
+// "path" - the real long name for the entry that immediately follows - is
+// relevant here.
+function parsePaxPath(dec: TextDecoder, data: Uint8Array): string | null {
+  // Record lengths are byte counts, but a value (the path itself) can
+  // contain multi-byte UTF-8 characters - decoding the whole buffer to a
+  // string upfront and slicing by string index would drift out of sync
+  // with those byte-based lengths as soon as one appears. Each record is
+  // decoded on its own, from its own exact byte range, instead.
+  let offset = 0;
+  while (offset < data.length) {
+    let spaceIdx = offset;
+    while (spaceIdx < data.length && data[spaceIdx] !== 0x20) spaceIdx++;
+    if (spaceIdx >= data.length) break;
+    const length = parseInt(dec.decode(data.slice(offset, spaceIdx)), 10);
+    if (!length || length <= 0 || offset + length > data.length) break;
+    const record = dec.decode(data.slice(offset, offset + length)),
+      eq = record.indexOf("=");
+    if (eq !== -1 && record.slice(spaceIdx - offset + 1, eq) === "path") return record.slice(eq + 1).replace(/\n$/, "");
+    offset += length;
+  }
+  return null;
+}
 export function readTarBytes(bytes: Uint8Array, source: string) {
   const out: ArchiveEntry[] = [],
     dec = new TextDecoder();
+  // A path longer than the classic 100-byte name field is carried either by
+  // a GNU longname entry (typeflag 'L') or a PAX extended header (typeflag
+  // 'x'/'g') immediately preceding the real entry - both override its name.
+  // Short of that, POSIX ustar splits a long path across "prefix"+"/"+name.
+  let pendingName: string | null = null;
   for (let o = 0; o + 512 <= bytes.length;) {
     if (bytes.slice(o, o + 512).every((x) => x === 0)) break;
-    const name = safe(dec.decode(bytes.slice(o, o + 100)).replace(/\0.*$/, "")),
+    const headerName = dec.decode(bytes.slice(o, o + 100)).replace(/\0.*$/, ""),
+      prefix = dec.decode(bytes.slice(o + 345, o + 500)).replace(/\0.*$/, ""),
       size = octal(bytes.slice(o + 124, o + 136)),
       mtime = octal(bytes.slice(o + 136, o + 148)),
       type = bytes[o + 156];
     o += 512;
+    const data = bytes.slice(o, o + size);
+    o += Math.ceil(size / 512) * 512;
+    if (type === 76 /* GNU longname */) { pendingName = safe(dec.decode(data).replace(/\0.*$/, "")); continue; }
+    if (type === 75 /* GNU longlink (link target) - not needed */) continue;
+    if (type === 120 || type === 103 /* PAX per-file / global extended header */) {
+      const paxPath = parsePaxPath(dec, data);
+      if (paxPath) pendingName = safe(paxPath);
+      continue;
+    }
+    const name = pendingName || safe(prefix ? `${prefix}/${headerName}` : headerName);
+    pendingName = null;
     if (name && type === 53)
       out.push({
         name,
@@ -348,11 +389,10 @@ export function readTarBytes(bytes: Uint8Array, source: string) {
       out.push({
         name,
         size,
-        data: bytes.slice(o, o + size),
+        data,
         date: mtime ? new Date(mtime * 1000) : undefined,
         source,
       });
-    o += Math.ceil(size / 512) * 512;
   }
   return out;
 }
