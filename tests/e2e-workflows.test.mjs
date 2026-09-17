@@ -147,6 +147,32 @@ function directoryPickerMockScript(delayMs) {
   })();`;
 }
 
+test("reads a RAR-routed archive through the libarchive/WASM path", { timeout: 90000 }, async () => {
+  // Regression test for a corrupted libarchive.wasm committed to public/
+  // (786444 bytes instead of the real 1002547) that silently broke every
+  // RAR/7Z extraction: the module failed to compile, and nothing short of
+  // opening the browser console said so - the UI just showed 0 entries.
+  const { page, consoleErrors } = await openPage();
+  await page.locator(".homeaction", { hasText: "Extraire" }).click();
+  await page.locator('input[type="file"]').first().setInputFiles(path.join(fixturesDir, "not-really-rar.rar"));
+  await page.waitForTimeout(3000);
+
+  assert.deepEqual(await page.locator(".v2error").allInnerTexts(), []);
+  const names = await page.locator(".v2row b").allInnerTexts();
+  assert.ok(names.some((n) => n.includes("bonjour.txt")), "expected bonjour.txt to be listed");
+  assert.ok(names.some((n) => n.includes("notes.txt")), "expected dossier/notes.txt to be listed");
+
+  // The dev server doesn't always send "application/wasm", which makes the
+  // browser fall back from streaming to ArrayBuffer instantiation - benign,
+  // and unrelated to the corrupted-file bug this test guards against (that
+  // one made even the ArrayBuffer fallback fail with a CompileError). Any
+  // other console error - in particular a CompileError/Aborted - must fail
+  // this test.
+  const unexpected = consoleErrors.filter((e) => !/wasm streaming compile failed|falling back to ArrayBuffer instantiation/.test(e));
+  assert.deepEqual(unexpected, [], "libarchive/WASM must load and decode without an unexpected console error");
+  await page.close();
+});
+
 test("quarantines a zip-bomb-style entry instead of extracting it", { timeout: 90000 }, async () => {
   const { page, consoleErrors } = await openPage();
   await page.locator(".homeaction", { hasText: "Extraire" }).click();
