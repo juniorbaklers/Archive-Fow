@@ -9,6 +9,7 @@ Ce document liste, honnêtement, ce qu'ArchiveFlow ne fait pas (encore), pour é
 - **Lecture d'archives chiffrées** : possible pour les formats qui le permettent via `libarchive.js`, avec saisie du mot de passe à la demande ; non garanti pour tous les schémas de chiffrement.
 - **Volumes multi-parties officiels** : les ZIP fractionnés (`.zNN` + `.zip`) et les archives RAR multi-volumes (`.partN.rar`) sont détectés mais **non reconstitués** automatiquement — l'application l'indique explicitement et recommande 7-Zip/WinRAR. Seule la concaténation séquentielle simple (`.001`, `.002`, …) est reconstituée automatiquement.
 - **Découpage en volumes à la création** : produit plusieurs archives complètes et indépendantes (`nom_part1.zip`, …), pas un format de volumes multi-parties liés entre eux comme le fait WinRAR/7-Zip.
+- **Dossiers vides dans les archives RAR/7Z** : la lecture RAR/7Z passe par `libarchive.js`, une bibliothèque tierce dont le modèle de données ne peut pas distinguer un dossier explicitement vide d'un simple préfixe de chemin sans fichier dessous — un dossier réellement vide à l'intérieur d'une archive RAR ou 7Z n'est donc pas recréé à l'extraction. Les fichiers et dossiers non vides, quels que soient leur nom ou leur profondeur, sont extraits correctement. (Ce même cas est géré correctement pour ZIP et TAR, où ArchiveFlow lit et écrit le format lui-même.)
 
 ## Plateforme
 
